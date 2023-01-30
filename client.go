@@ -16,7 +16,7 @@ func failOnError(err error, msg string) {
 	}
 }
 
-func main() {
+func client(binding_key string, body string) {
 	conn, err := amqp.Dial("amqp://guest:guest@localhost:5672/")
 	failOnError(err, "Failed to connect to RabbitMQ")
 	defer conn.Close()
@@ -39,12 +39,11 @@ func main() {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	body := bodyFrom(os.Args)
 	err = ch.PublishWithContext(ctx,
-		"logs_topic",          // exchange
-		severityFrom(os.Args), // routing key
-		false,                 // mandatory
-		false,                 // immediate
+		"logs_topic", // exchange
+		binding_key,
+		false, // mandatory
+		false, // immediate
 		amqp.Publishing{
 			ContentType: "text/plain",
 			Body:        []byte(body),
