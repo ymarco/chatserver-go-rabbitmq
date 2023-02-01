@@ -25,6 +25,7 @@ type Client struct {
 	ch   *amqp.Channel
 	q    amqp.Queue
 	errs chan error
+	quit chan struct{}
 }
 
 func NewClient(conn *amqp.Connection, name string) (*Client, error) {
@@ -37,7 +38,7 @@ func NewClient(conn *amqp.Connection, name string) (*Client, error) {
 		exchangeName,
 		"topic", // type
 		true,    // durable
-		true,   // auto-deleted
+		true,    // auto-deleted
 		false,   // internal
 		false,   // no-wait
 		nil,     // arguments
@@ -58,7 +59,7 @@ func NewClient(conn *amqp.Connection, name string) (*Client, error) {
 		return nil, err
 	}
 
-	return &Client{name, ch, q, make(chan error, 1)}, nil
+	return &Client{name, ch, q, make(chan error, 1), make(chan struct{}, 1)}, nil
 }
 
 func (client *Client) Close() error {
@@ -112,8 +113,11 @@ func RunClient(name string) {
 	go client.readUserInputLoop(ctx)
 	go client.printQueueMsgs(ctx)
 
-	err = <-client.errs
-	log.Fatalln("final err:", err)
+	select {
+	case err := <-client.errs:
+		log.Fatalln("final err:", err)
+	case <-client.quit:
+	}
 }
 
 func (client *Client) readUserInputLoop(ctx context.Context) {
@@ -147,13 +151,13 @@ func isValidBindingKeyComponent(str string) bool {
 	return !strings.ContainsAny(str, ".#*")
 }
 
-var ErrClientHasQuit = errors.New("Client has quit")
 var ErrInvalidTopicComponent = errors.New("topic components can't contain ., #, *")
 
 func (client *Client) runCmd(cmd Cmd, args []string, ctx context.Context) error {
 	switch cmd {
 	case CmdLogout:
-		return ErrClientHasQuit
+		client.quit <- struct{}{}
+		return nil
 	case CmdJoinRoom, CmdLeaveRoom:
 		if len(args) != 1 {
 			fmt.Printf("Usage: %s ROOM_NAME\n", CmdJoinRoom)
