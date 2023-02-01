@@ -66,25 +66,25 @@ func (client *Client) Close() error {
 	return client.ch.Close()
 }
 
-func (client *Client) bindToKey(key string) error {
+func (client *Client) bindToKey(key BindingKey) error {
 	log.Printf("Bound to %s\n", key)
 	return client.ch.QueueBind(
 		client.q.Name, // queue name
-		key,           // routing key
+		string(key),           // routing key
 		exchangeName,
 		false,
 		nil)
 }
-func (client *Client) unbindToKey(key string) error {
+func (client *Client) unbindToKey(key BindingKey) error {
 	log.Printf("Not bound to %s\n", key)
-	return client.ch.QueueUnbind(client.q.Name, key, exchangeName, nil)
+	return client.ch.QueueUnbind(client.q.Name, string(key), exchangeName, nil)
 }
 
-func (client *Client) sendMsg(bindingKey string, body string, ctx context.Context) error {
-	log.Printf("Sending on %s\n", bindingKey)
+func (client *Client) sendMsg(key BindingKey, body string, ctx context.Context) error {
+	log.Printf("Sending on %s\n", key)
 	return client.ch.PublishWithContext(ctx,
 		exchangeName,
-		bindingKey,
+		string(key),
 		false, // mandatory
 		false, // immediate
 		amqp.Publishing{
@@ -189,7 +189,7 @@ func (client *Client) dispatchBindCmd(cmd Cmd, args []string) error {
 }
 
 func (client *Client) dispatchSendCmd(cmd Cmd, args []string, ctx context.Context) error {
-	key := ""
+	key := BindingKey("")
 	body := ""
 	switch cmd {
 	case CmdSend:
@@ -212,7 +212,7 @@ func (client *Client) dispatchSendCmd(cmd Cmd, args []string, ctx context.Contex
 			return ErrWrongNumberOfArgs
 		}
 		room := args[0]
-		if !isValidBindingKeyComponent(key) {
+		if !isValidBindingKeyComponent(room) {
 			return ErrInvalidTopicComponent
 		}
 		key = BindingKeyForRoom(room)

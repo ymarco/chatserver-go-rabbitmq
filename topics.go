@@ -1,10 +1,11 @@
 package main
+type BindingKey string
 
-func BindingKeyForRoom(room string) string {
-	return "rooms." + room
+func BindingKeyForRoom(room string) BindingKey {
+	return BindingKey("rooms." + room)
 }
 
-func BindingKeyForPrivateMsg(recipient string) string{
-	return "private." + recipient
+func BindingKeyForPrivateMsg(recipient string) BindingKey{
+	return BindingKey("private." + recipient)
 }
-const BindingKeyForGlobalRoom = "global"
+const BindingKeyForGlobalRoom = BindingKey("global")
