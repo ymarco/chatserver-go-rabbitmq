@@ -1,8 +1,10 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"log"
+	"os"
 
 	amqp "github.com/rabbitmq/amqp091-go"
 )
@@ -19,11 +21,10 @@ type Client struct {
 	name string
 	ch   *amqp.Channel
 	q    amqp.Queue
+	errs chan error
 }
 
 func NewClient(conn *amqp.Connection, name string) (*Client, error) {
-	defer conn.Close()
-
 	ch, err := conn.Channel()
 	if err != nil {
 		return nil, err
@@ -54,7 +55,7 @@ func NewClient(conn *amqp.Connection, name string) (*Client, error) {
 		return nil, err
 	}
 
-	return &Client{name, ch, q}, nil
+	return &Client{name, ch, q, make(chan error, 1)}, nil
 }
 
 func (client *Client) Close() error {
@@ -82,19 +83,42 @@ func (client *Client) sendMsg(bindingKey string, body string, ctx context.Contex
 		})
 }
 
-func RunClient(binding_keys []string) {
+func RunClient() {
 	conn, err := amqp.Dial("amqp://guest:guest@localhost:5672/")
+	defer conn.Close()
 	failOnError(err, "Failed to connect to RabbitMQ")
 	client, err := NewClient(conn, "TODO name")
 	failOnError(err, "Couldn't create client")
 	defer client.Close()
-	for _, key := range binding_keys {
-		log.Printf("Binding queue %s to exchange %s with routing key %s",
-			client.q.Name, exchangeName, key)
-		err := client.bindToKey(key)
-		failOnError(err, "Failed to bind a queue")
+
+	err = client.bindToKey("key1")
+	if err != nil {
+		log.Fatalln("aoeu", err)
 	}
 
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	go client.readUserInputLoop(ctx)
+	go client.printQueueMsgs(ctx)
+
+	log.Printf(" [*] Waiting for logs. To exit press CTRL+C")
+	var forever chan struct{}
+	<-forever
+}
+
+func (client *Client) readUserInputLoop(ctx context.Context) {
+	scanner := bufio.NewScanner(os.Stdin)
+	line := ""
+	for err := error(nil); err == nil; line, err = ScanLine(scanner) {
+		err := client.sendMsg("key1", line, ctx)
+		if err != nil {
+			return
+		}
+	}
+}
+
+func (client *Client) printQueueMsgs(ctx context.Context) {
 	msgs, err := client.ch.Consume(
 		client.q.Name, // queue
 		"",            // consumer
@@ -106,14 +130,15 @@ func RunClient(binding_keys []string) {
 	)
 	failOnError(err, "Failed to register a consumer")
 
-	var forever chan struct{}
-
-	go func() {
-		for d := range msgs {
-			log.Printf(" [x] %s", d.Body)
+	for {
+		select {
+		case msg, ok := <-msgs:
+			if !ok {
+				return
+			}
+			log.Printf(" [x] %s", msg.Body)
+		case <-ctx.Done():
+			return
 		}
-	}()
-
-	log.Printf(" [*] Waiting for logs. To exit press CTRL+C")
-	<-forever
+	}
 }
