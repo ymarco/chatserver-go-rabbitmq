@@ -33,7 +33,7 @@ const (
 var ErrUnknownCmd = errors.New("unknown cmd")
 
 func formatDocStringForCmd(cmd Cmd, args, docs string) string {
-	return "\t" + CmdPrefix + string(cmd) + args + "\n\t\t" + docs
+	return "\t" + CmdPrefix + string(cmd) + "\t" + args + "\n\t\t" + docs
 
 }
 

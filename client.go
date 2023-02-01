@@ -139,7 +139,7 @@ func (client *Client) readUserInputLoop(ctx context.Context) {
 func (client *Client) dispatchUserInput(line string, ctx context.Context) error {
 	if IsCmd(line) {
 		cmd, args := UnserializeStrToCmd(line)
-		return client.runCmd(cmd, args, ctx)
+		return client.dispatchCmd(cmd, args, ctx)
 	} else {
 		return client.sendMsg(BindingKeyForGlobalRoom, line, ctx)
 	}
@@ -153,64 +153,72 @@ func isValidBindingKeyComponent(str string) bool {
 
 var ErrInvalidTopicComponent = errors.New("topic components can't contain ., #, *")
 
-func (client *Client) runCmd(cmd Cmd, args []string, ctx context.Context) error {
+func (client *Client) dispatchCmd(cmd Cmd, args []string, ctx context.Context) error {
 	switch cmd {
 	case CmdLogout:
 		client.quit <- struct{}{}
 		return nil
 	case CmdJoinRoom, CmdLeaveRoom:
-		if len(args) != 1 {
-			fmt.Printf("Usage: %s ROOM_NAME\n", CmdJoinRoom)
-			return ErrWrongNumberOfArgs
-		}
-		key := args[0]
-		if !isValidBindingKeyComponent(key) {
-			return ErrInvalidTopicComponent
-		}
-		switch cmd {
-		case CmdJoinRoom:
-			return client.bindToKey(BindingKeyForRoom(key))
-		case CmdLeaveRoom:
-			return client.unbindToKey(BindingKeyForRoom(key))
-		}
-		panic("unreachable")
+		return client.dispatchBindCmd(cmd, args)
 	case CmdSend, CmdSendRoom, CmdWhisper:
-		key := ""
-		body := ""
-		switch cmd {
-		case CmdSend:
-			key = BindingKeyForGlobalRoom
-			body = strings.Join(args, " ")
-		case CmdWhisper:
-			if len(args) < 1 {
-				fmt.Printf("Usage: %s USERNAME MSG...", cmd)
-				return ErrWrongNumberOfArgs
-			}
-			username := args[0]
-			if !isValidBindingKeyComponent(username) {
-				return ErrInvalidTopicComponent
-			}
-			key = BindingKeyForPrivateMsg(username)
-			body = strings.Join(args[1:], " ")
-		case CmdSendRoom:
-			if len(args) < 1 {
-				fmt.Printf("Usage: %s ROOM_NAME MSG...", cmd)
-				return ErrWrongNumberOfArgs
-			}
-			room := args[0]
-			if !isValidBindingKeyComponent(key) {
-				return ErrInvalidTopicComponent
-			}
-			key = BindingKeyForRoom(room)
-			body = strings.Join(args[1:], " ")
-		}
-		return client.sendMsg(key, body, ctx)
+		return client.dispatchSendCmd(cmd, args, ctx)
 	case CmdHelp:
 		fmt.Println(helpString)
 		return nil
 	default:
 		return ErrUnknownCmd
 	}
+}
+
+func (client *Client) dispatchBindCmd(cmd Cmd, args []string) error {
+	if len(args) != 1 {
+		fmt.Printf("Usage: %s ROOM_NAME\n", CmdJoinRoom)
+		return ErrWrongNumberOfArgs
+	}
+	key := args[0]
+	if !isValidBindingKeyComponent(key) {
+		return ErrInvalidTopicComponent
+	}
+	switch cmd {
+	case CmdJoinRoom:
+		return client.bindToKey(BindingKeyForRoom(key))
+	case CmdLeaveRoom:
+		return client.unbindToKey(BindingKeyForRoom(key))
+	}
+	panic("unreachable")
+}
+
+func (client *Client) dispatchSendCmd(cmd Cmd, args []string, ctx context.Context) error {
+	key := ""
+	body := ""
+	switch cmd {
+	case CmdSend:
+		key = BindingKeyForGlobalRoom
+		body = strings.Join(args, " ")
+	case CmdWhisper:
+		if len(args) < 1 {
+			fmt.Printf("Usage: %s USERNAME MSG...", cmd)
+			return ErrWrongNumberOfArgs
+		}
+		username := args[0]
+		if !isValidBindingKeyComponent(username) {
+			return ErrInvalidTopicComponent
+		}
+		key = BindingKeyForPrivateMsg(username)
+		body = strings.Join(args[1:], " ")
+	case CmdSendRoom:
+		if len(args) < 1 {
+			fmt.Printf("Usage: %s ROOM_NAME MSG...", cmd)
+			return ErrWrongNumberOfArgs
+		}
+		room := args[0]
+		if !isValidBindingKeyComponent(key) {
+			return ErrInvalidTopicComponent
+		}
+		key = BindingKeyForRoom(room)
+		body = strings.Join(args[1:], " ")
+	}
+	return client.sendMsg(key, body, ctx)
 }
 
 var ErrNoSender = errors.New("msg header doesn't contain a sender")
