@@ -6,6 +6,8 @@ import (
 	amqp "github.com/rabbitmq/amqp091-go"
 )
 
+const exchangeName = "logs_topic"
+
 func server(binding_keys []string) {
 	conn, err := amqp.Dial("amqp://guest:guest@localhost:5672/")
 	failOnError(err, "Failed to connect to RabbitMQ")
@@ -16,13 +18,13 @@ func server(binding_keys []string) {
 	defer ch.Close()
 
 	err = ch.ExchangeDeclare(
-		"logs_topic", // name
-		"topic",      // type
-		true,         // durable
-		false,        // auto-deleted
-		false,        // internal
-		false,        // no-wait
-		nil,          // arguments
+		exchangeName,
+		"topic", // type
+		true,    // durable
+		false,   // auto-deleted
+		false,   // internal
+		false,   // no-wait
+		nil,     // arguments
 	)
 	failOnError(err, "Failed to declare an exchange")
 
@@ -39,9 +41,9 @@ func server(binding_keys []string) {
 	for _, key := range binding_keys {
 		log.Printf("Binding queue %s to exchange %s with routing key %s", q.Name, "logs_topic", key)
 		err = ch.QueueBind(
-			q.Name,       // queue name
-			key,            // routing key
-			"logs_topic", // exchange
+			q.Name, // queue name
+			key,    // routing key
+			exchangeName,
 			false,
 			nil)
 		failOnError(err, "Failed to bind a queue")
