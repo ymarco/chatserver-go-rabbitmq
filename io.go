@@ -25,3 +25,22 @@ func ClosePrintErr(c io.Closer) {
 		log.Println(err)
 	}
 }
+
+type ReadInput struct {
+	Val string
+	Err error
+}
+
+func ReadAsyncIntoChan(scanner *bufio.Scanner) <-chan ReadInput {
+	inputs := make(chan ReadInput)
+	go func() {
+		for {
+			str, err := ScanLine(scanner)
+			inputs <- ReadInput{str, err}
+			if err != nil {
+				return
+			}
+		}
+	}()
+	return inputs
+}

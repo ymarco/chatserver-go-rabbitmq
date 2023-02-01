@@ -37,7 +37,7 @@ func NewClient(conn *amqp.Connection, name string) (*Client, error) {
 	err = ch.ExchangeDeclare(
 		exchangeName,
 		"topic", // type
-		true,    // durable
+		false,   // durable
 		true,    // auto-deleted
 		false,   // internal
 		false,   // no-wait
@@ -70,7 +70,7 @@ func (client *Client) bindToKey(key BindingKey) error {
 	log.Printf("Bound to %s\n", key)
 	return client.ch.QueueBind(
 		client.q.Name, // queue name
-		string(key),           // routing key
+		string(key),   // routing key
 		exchangeName,
 		false,
 		nil)
@@ -104,6 +104,7 @@ func RunClient(name string) {
 	defer ClosePrintErr(client)
 
 	err = client.bindToKey(BindingKeyForGlobalRoom)
+	failOnError(err, "Couldn't bind")
 	err = client.bindToKey(BindingKeyForPrivateMsg(name))
 	failOnError(err, "Couldn't bind")
 
@@ -122,26 +123,37 @@ func RunClient(name string) {
 
 func (client *Client) readUserInputLoop(ctx context.Context) {
 	scanner := bufio.NewScanner(os.Stdin)
-	for line, err := ScanLine(scanner); err == nil; line, err = ScanLine(scanner) {
-		err := client.dispatchUserInput(line, ctx)
-		if err != nil {
-			switch err {
-			case ErrUnknownCmd:
-				fmt.Println("Unknown cmd")
-			default:
-				client.errs <- err
+	userInput := ReadAsyncIntoChan(scanner)
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case input := <-userInput:
+			if input.Err != nil {
+				client.errs <- input.Err
 				return
+			}
+
+			err := client.dispatchUserInput(input.Val, ctx)
+			if err != nil {
+				switch err {
+				case ErrUnknownCmd:
+					fmt.Println("Unknown cmd")
+				default:
+					client.errs <- err
+					return
+				}
 			}
 		}
 	}
 }
 
-func (client *Client) dispatchUserInput(line string, ctx context.Context) error {
-	if IsCmd(line) {
-		cmd, args := UnserializeStrToCmd(line)
+func (client *Client) dispatchUserInput(input string, ctx context.Context) error {
+	if IsCmd(input) {
+		cmd, args := UnserializeStrToCmd(input)
 		return client.dispatchCmd(cmd, args, ctx)
 	} else {
-		return client.sendMsg(BindingKeyForGlobalRoom, line, ctx)
+		return client.sendMsg(BindingKeyForGlobalRoom, input, ctx)
 	}
 }
 
