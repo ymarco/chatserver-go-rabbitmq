@@ -10,20 +10,24 @@ import (
 const exchangeName = "logs_topic"
 
 func failOnError(err error, msg string) {
-        if err != nil {
-                log.Panicf("%s: %s", msg, err)
-        }
+	if err != nil {
+		log.Panicf("%s: %s", msg, err)
+	}
 }
 
+type Client struct {
+	name string
+	ch   *amqp.Channel
+	q    amqp.Queue
+}
 
-func client(binding_keys []string) {
-	conn, err := amqp.Dial("amqp://guest:guest@localhost:5672/")
-	failOnError(err, "Failed to connect to RabbitMQ")
+func NewClient(conn *amqp.Connection, name string) (*Client, error) {
 	defer conn.Close()
 
 	ch, err := conn.Channel()
-	failOnError(err, "Failed to open a channel")
-	defer ch.Close()
+	if err != nil {
+		return nil, err
+	}
 
 	err = ch.ExchangeDeclare(
 		exchangeName,
@@ -34,7 +38,9 @@ func client(binding_keys []string) {
 		false,   // no-wait
 		nil,     // arguments
 	)
-	failOnError(err, "Failed to declare an exchange")
+	if err != nil {
+		return nil, err
+	}
 
 	q, err := ch.QueueDeclare(
 		"",    // name
@@ -44,22 +50,59 @@ func client(binding_keys []string) {
 		false, // no-wait
 		nil,   // arguments
 	)
-	failOnError(err, "Failed to declare a queue")
+	if err != nil {
+		return nil, err
+	}
 
+	return &Client{name, ch, q}, nil
+}
+
+func (client *Client) Close() error {
+	return client.ch.Close()
+}
+
+func (client *Client) bindToKey(key string) error {
+	return client.ch.QueueBind(
+		client.q.Name, // queue name
+		key,           // routing key
+		exchangeName,
+		false,
+		nil)
+}
+
+func (client *Client) sendMsg(bindingKey string, body string, ctx context.Context) error {
+	return client.ch.PublishWithContext(ctx,
+		exchangeName,
+		bindingKey,
+		false, // mandatory
+		false, // immediate
+		amqp.Publishing{
+			ContentType: "text/plain",
+			Body:        []byte(body),
+		})
+}
+
+func RunClient(binding_keys []string) {
+	conn, err := amqp.Dial("amqp://guest:guest@localhost:5672/")
+	failOnError(err, "Failed to connect to RabbitMQ")
+	client, err := NewClient(conn, "TODO name")
+	failOnError(err, "Couldn't create client")
+	defer client.Close()
 	for _, key := range binding_keys {
-		log.Printf("Binding queue %s to exchange %s with routing key %s", q.Name, "logs_topic", key)
-		err := bindToKey(ch, q, key)
+		log.Printf("Binding queue %s to exchange %s with routing key %s",
+			client.q.Name, exchangeName, key)
+		err := client.bindToKey(key)
 		failOnError(err, "Failed to bind a queue")
 	}
 
-	msgs, err := ch.Consume(
-		q.Name, // queue
-		"",     // consumer
-		true,   // auto ack
-		false,  // exclusive
-		false,  // no local
-		false,  // no wait
-		nil,    // args
+	msgs, err := client.ch.Consume(
+		client.q.Name, // queue
+		"",            // consumer
+		true,          // auto ack
+		false,         // exclusive
+		false,         // no local
+		false,         // no wait
+		nil,           // args
 	)
 	failOnError(err, "Failed to register a consumer")
 
@@ -73,25 +116,4 @@ func client(binding_keys []string) {
 
 	log.Printf(" [*] Waiting for logs. To exit press CTRL+C")
 	<-forever
-}
-
-func bindToKey(ch *amqp.Channel, q amqp.Queue, key string) error {
-	return ch.QueueBind(
-		q.Name, // queue name
-		key,    // routing key
-		exchangeName,
-		false,
-		nil)
-}
-
-func sendMsg(ch *amqp.Channel, bindingKey string, body string, ctx context.Context) error {
-	return ch.PublishWithContext(ctx,
-		exchangeName,
-		bindingKey,
-		false, // mandatory
-		false, // immediate
-		amqp.Publishing{
-			ContentType: "text/plain",
-			Body:        []byte(body),
-		})
 }
