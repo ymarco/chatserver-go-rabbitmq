@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"io"
+	"log"
 )
 
 // ScanLine is a wrapper around Scanner.Scan() that returns EOF as errors
@@ -16,4 +17,11 @@ func ScanLine(s *bufio.Scanner) (string, error) {
 		}
 	}
 	return s.Text(), nil
+}
+
+func ClosePrintErr(c io.Closer) {
+	err := c.Close()
+	if err != nil {
+		log.Println(err)
+	}
 }

@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"context"
+	"errors"
 	"log"
 	"os"
 
@@ -80,16 +81,17 @@ func (client *Client) sendMsg(bindingKey string, body string, ctx context.Contex
 		amqp.Publishing{
 			ContentType: "text/plain",
 			Body:        []byte(body),
+			Headers:     map[string]interface{}{"sender": client.name},
 		})
 }
 
-func RunClient() {
+func RunClient(name string) {
 	conn, err := amqp.Dial("amqp://guest:guest@localhost:5672/")
-	defer conn.Close()
+	defer ClosePrintErr(conn)
 	failOnError(err, "Failed to connect to RabbitMQ")
-	client, err := NewClient(conn, "TODO name")
+	client, err := NewClient(conn, name)
 	failOnError(err, "Couldn't create client")
-	defer client.Close()
+	defer ClosePrintErr(client)
 
 	err = client.bindToKey("key1")
 	if err != nil {
@@ -101,22 +103,22 @@ func RunClient() {
 
 	go client.readUserInputLoop(ctx)
 	go client.printQueueMsgs(ctx)
-
 	log.Printf(" [*] Waiting for logs. To exit press CTRL+C")
-	var forever chan struct{}
-	<-forever
+	err = <-client.errs
+	log.Fatalln("final err:", err)
 }
 
 func (client *Client) readUserInputLoop(ctx context.Context) {
 	scanner := bufio.NewScanner(os.Stdin)
-	line := ""
-	for err := error(nil); err == nil; line, err = ScanLine(scanner) {
+	for line, err := ScanLine(scanner); err == nil; line, err = ScanLine(scanner) {
 		err := client.sendMsg("key1", line, ctx)
 		if err != nil {
 			return
 		}
 	}
 }
+
+var ErrNoSender = errors.New("msg header doesn't contain a sender")
 
 func (client *Client) printQueueMsgs(ctx context.Context) {
 	msgs, err := client.ch.Consume(
@@ -136,7 +138,15 @@ func (client *Client) printQueueMsgs(ctx context.Context) {
 			if !ok {
 				return
 			}
-			log.Printf(" [x] %s", msg.Body)
+			sender, ok := msg.Headers["sender"]
+			if !ok {
+				client.errs <- ErrNoSender
+				return
+			}
+			if sender == client.name {
+				continue
+			}
+			log.Printf("%s: %s", sender, msg.Body)
 		case <-ctx.Done():
 			return
 		}
