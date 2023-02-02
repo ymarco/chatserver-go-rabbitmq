@@ -8,17 +8,12 @@ import (
 	"log"
 	"os"
 	"strings"
+	"time"
 
 	amqp "github.com/rabbitmq/amqp091-go"
 )
 
 const exchangeName = "go_chatserver"
-
-func failOnError(err error, msg string) {
-	if err != nil {
-		log.Panicf("%s: %s", msg, err)
-	}
-}
 
 type Client struct {
 	name string
@@ -94,32 +89,94 @@ func (client *Client) sendMsg(key BindingKey, body string, ctx context.Context) 
 		})
 }
 
+const channelReconnectDelay = 1 * time.Second
+const connectionReconnectDelay = 5 * time.Second
+
 func RunClient(name string) {
+	for RunClientUntilDisconnected(name) {
+		fmt.Printf("Retrying in %s ...\n", connectionReconnectDelay)
+		time.Sleep(connectionReconnectDelay)
+	}
+}
+func RunClientUntilDisconnected(name string) (shouldReconnect bool) {
 	conn, err := amqp.Dial("amqp://guest:guest@localhost:5672/")
+	if err != nil {
+		if errIsConnectionRefused(err) {
+			log.Println(err)
+			return true
+		}
+		log.Fatalln(err)
+	}
 	defer ClosePrintErr(conn)
-	failOnError(err, "Failed to connect to RabbitMQ")
+	connClosed := conn.NotifyClose(make(chan *amqp.Error))
 	log.Printf("Connected to %s\n", conn.RemoteAddr())
+
+	for {
+		action := RunClientUntilChannelClosed(name, conn, connClosed)
+		fmt.Println("here")
+		switch action {
+		case ReconnectActionShouldOnlyReopenChannel:
+			fmt.Printf("Channel closed, retrynig in %s\n", channelReconnectDelay)
+			time.Sleep(channelReconnectDelay)
+			continue
+		case ReconnectActionShouldReopenConnection:
+			return true
+		case ReconnectActionShouldQuit:
+			return false
+		}
+	}
+}
+
+type ReconnectAction int
+
+const (
+	ReconnectActionShouldOnlyReopenChannel ReconnectAction = iota
+	ReconnectActionShouldReopenConnection
+	ReconnectActionShouldQuit
+)
+
+func RunClientUntilChannelClosed(name string, conn *amqp.Connection, connClosed chan *amqp.Error) ReconnectAction {
 	client, err := NewClient(conn, name)
-	failOnError(err, "Couldn't create client")
+	if err != nil {
+		log.Fatalln(err)
+	}
 	defer ClosePrintErr(client)
+	chClosed := client.ch.NotifyClose(make(chan *amqp.Error))
 
 	err = client.bindToKey(BindingKeyForGlobalRoom)
-	failOnError(err, "Couldn't bind")
+	if err != nil {
+		log.Fatalln(err)
+	}
 	err = client.bindToKey(BindingKeyForPrivateMsg(name))
-	failOnError(err, "Couldn't bind")
+	if err != nil {
+		log.Fatalln(err)
+	}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
+	defer fmt.Println("finished")
 	go client.readUserInputLoop(ctx)
 	go client.printQueueMsgs(ctx)
 
 	select {
+	case <-connClosed:
+		fmt.Println("a")
+		return ReconnectActionShouldReopenConnection
+	case <-chClosed:
+		fmt.Println("b")
+		return ReconnectActionShouldOnlyReopenChannel
 	case err := <-client.errs:
+		fmt.Println("c")
 		log.Fatalln("final err:", err)
+		return ReconnectActionShouldQuit
 	case <-client.quit:
+		fmt.Println("d")
+		return ReconnectActionShouldQuit
 	}
 }
+
+const DispatchUserInputTimeout = 200 * time.Millisecond
 
 func (client *Client) readUserInputLoop(ctx context.Context) {
 	scanner := bufio.NewScanner(os.Stdin)
@@ -149,6 +206,10 @@ func (client *Client) readUserInputLoop(ctx context.Context) {
 }
 
 func (client *Client) dispatchUserInput(input string, ctx context.Context) error {
+	fmt.Println("dispatch user input")
+	ctx, cancel := context.WithTimeout(ctx, DispatchUserInputTimeout)
+	defer cancel()
+
 	if IsCmd(input) {
 		cmd, args := UnserializeStrToCmd(input)
 		return client.dispatchCmd(cmd, args, ctx)
@@ -245,7 +306,10 @@ func (client *Client) printQueueMsgs(ctx context.Context) {
 		false,         // no wait
 		nil,           // args
 	)
-	failOnError(err, "Failed to register a consumer")
+	if err != nil {
+		client.errs <- err
+		return
+	}
 
 	for {
 		select {

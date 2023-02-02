@@ -4,6 +4,9 @@ import (
 	"bufio"
 	"io"
 	"log"
+	"net"
+	"os"
+	"syscall"
 )
 
 // ScanLine is a wrapper around Scanner.Scan() that returns EOF as errors
@@ -43,4 +46,12 @@ func ReadAsyncIntoChan(scanner *bufio.Scanner) <-chan ReadInput {
 		}
 	}()
 	return inputs
+}
+func errIsConnectionRefused(err error) bool {
+	if oerr, ok := err.(*net.OpError); ok {
+		if serr, ok := oerr.Err.(*os.SyscallError); ok && serr.Err == syscall.ECONNREFUSED {
+			return true
+		}
+	}
+	return false
 }
