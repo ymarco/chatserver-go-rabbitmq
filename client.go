@@ -209,7 +209,7 @@ func (client *Client) dispatchSendCmd(cmd Cmd, args []string, ctx context.Contex
 		body = strings.Join(args, " ")
 	case CmdWhisper:
 		if len(args) < 1 {
-			fmt.Printf("Usage: %s USERNAME MSG...", cmd)
+			fmt.Printf("Usage: %s USERNAME MSG...\n", cmd)
 			return ErrWrongNumberOfArgs
 		}
 		username := args[0]
@@ -220,7 +220,7 @@ func (client *Client) dispatchSendCmd(cmd Cmd, args []string, ctx context.Contex
 		body = strings.Join(args[1:], " ")
 	case CmdSendRoom:
 		if len(args) < 1 {
-			fmt.Printf("Usage: %s ROOM_NAME MSG...", cmd)
+			fmt.Printf("Usage: %s ROOM_NAME MSG...\n", cmd)
 			return ErrWrongNumberOfArgs
 		}
 		room := args[0]
