@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"strings"
@@ -191,6 +192,10 @@ func (client *Client) readUserInputLoop(ctx context.Context) {
 			return
 		case input := <-userInput:
 			if input.Err != nil {
+				if input.Err == io.EOF {
+					client.quit <- struct{}{}
+					return
+				}
 				client.errs <- input.Err
 				return
 			}
