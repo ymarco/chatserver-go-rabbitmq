@@ -140,11 +140,10 @@ func RunClientUntilChannelClosed(name string, conn *amqp.Connection, connClosed 
 	if err != nil {
 		log.Fatalln(err)
 	}
-	// if the connection was closed e.g. when rabbit terminates, closing the
-	// channel would hang the entire program, so we don't close it then
-	shouldCloseConn := true
 	defer func() {
-		if shouldCloseConn {
+		// if the connection was closed e.g. when rabbit terminates, closing the
+		// channel would hang the entire program, so we don't close it then
+		if !conn.IsClosed() {
 			ClosePrintErr(client)
 		}
 	}()
@@ -167,7 +166,6 @@ func RunClientUntilChannelClosed(name string, conn *amqp.Connection, connClosed 
 
 	select {
 	case err := <-connClosed:
-		shouldCloseConn = false
 		if err != nil {
 			log.Println(err)
 		}
