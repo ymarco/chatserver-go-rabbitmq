@@ -309,7 +309,7 @@ var ErrNoSender = errors.New("msg header doesn't contain a sender")
 func (client *Client) printQueueMsgsLoop(ctx context.Context) {
 	msgs, err := client.ch.Consume(
 		client.q.Name, // queue
-		"",            // consumer
+		client.name,   // consumer
 		true,          // auto ack
 		true,          // exclusive
 		false,         // no local
@@ -320,6 +320,11 @@ func (client *Client) printQueueMsgsLoop(ctx context.Context) {
 		client.errs <- err
 		return
 	}
+	defer func() {
+		if err := client.ch.Cancel(client.name, true); err != nil {
+			log.Println(err)
+		}
+	}()
 
 	for {
 		select {
