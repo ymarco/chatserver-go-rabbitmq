@@ -81,7 +81,7 @@ func (client *Client) sendMsg(key BindingKey, body string, ctx context.Context) 
 	return client.ch.PublishWithContext(ctx,
 		exchangeName,
 		string(key),
-		false, // mandatory
+		true,  // mandatory
 		false, // immediate
 		amqp.Publishing{
 			ContentType: "text/plain",
@@ -163,6 +163,7 @@ func RunClientUntilChannelClosed(name string, conn *amqp.Connection, connClosed 
 
 	go client.readUserInputLoop(ctx)
 	go client.printQueueMsgsLoop(ctx)
+	go client.printReturendMsgsLoop(ctx)
 
 	select {
 	case err := <-connClosed:
@@ -345,4 +346,22 @@ func (client *Client) printQueueMsgsLoop(ctx context.Context) {
 			return
 		}
 	}
+}
+
+func (client *Client) printReturendMsgsLoop(ctx context.Context) {
+
+	returned := make(chan amqp.Return)
+	client.ch.NotifyReturn(returned)
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case msg, ok := <-returned:
+			if !ok {
+				return
+			}
+			log.Printf("Couldn't send msg on %s: %s\n", msg.RoutingKey, msg.Body)
+		}
+	}
+
 }
