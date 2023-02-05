@@ -44,7 +44,7 @@ func NewClient(conn *amqp.Connection, name string) (*Client, error) {
 	}
 
 	q, err := ch.QueueDeclare(
-		"",    // name
+		name,  // name
 		false, // durable
 		false, // delete when unused
 		true,  // exclusive
@@ -313,7 +313,7 @@ func (client *Client) printQueueMsgsLoop(ctx context.Context) {
 		client.q.Name, // queue
 		"",            // consumer
 		true,          // auto ack
-		false,         // exclusive
+		true,          // exclusive
 		false,         // no local
 		false,         // no wait
 		nil,           // args
