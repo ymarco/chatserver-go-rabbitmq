@@ -71,8 +71,8 @@ func (client *Client) bindToKey(key BindingKey) error {
 		false,
 		nil)
 }
-func (client *Client) unbindToKey(key BindingKey) error {
-	log.Printf("Not bound to %s\n", key)
+func (client *Client) unbindFromKey(key BindingKey) error {
+	log.Printf("Unbound from %s\n", key)
 	return client.ch.QueueUnbind(client.q.Name, string(key), exchangeName, nil)
 }
 
@@ -165,7 +165,7 @@ func RunClientUntilChannelClosed(name string, conn *amqp.Connection, connClosed 
 
 	defer fmt.Println("finished")
 	go client.readUserInputLoop(ctx)
-	go client.printQueueMsgs(ctx)
+	go client.printQueueMsgsLoop(ctx)
 
 	select {
 	case <-connClosed:
@@ -265,7 +265,7 @@ func (client *Client) dispatchBindCmd(cmd Cmd, args []string) error {
 	case CmdJoinRoom:
 		return client.bindToKey(BindingKeyForRoom(key))
 	case CmdLeaveRoom:
-		return client.unbindToKey(BindingKeyForRoom(key))
+		return client.unbindFromKey(BindingKeyForRoom(key))
 	}
 	panic("unreachable")
 }
@@ -305,7 +305,7 @@ func (client *Client) dispatchSendCmd(cmd Cmd, args []string, ctx context.Contex
 
 var ErrNoSender = errors.New("msg header doesn't contain a sender")
 
-func (client *Client) printQueueMsgs(ctx context.Context) {
+func (client *Client) printQueueMsgsLoop(ctx context.Context) {
 	msgs, err := client.ch.Consume(
 		client.q.Name, // queue
 		"",            // consumer
