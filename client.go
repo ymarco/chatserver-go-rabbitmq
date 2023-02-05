@@ -114,7 +114,6 @@ func RunClientUntilDisconnected(name string) (shouldReconnect bool) {
 
 	for {
 		action := RunClientUntilChannelClosed(name, conn, connClosed)
-		fmt.Println("here")
 		switch action {
 		case ReconnectActionShouldOnlyReopenChannel:
 			fmt.Printf("Channel closed, retrynig in %s\n", channelReconnectDelay)
@@ -163,7 +162,6 @@ func RunClientUntilChannelClosed(name string, conn *amqp.Connection, connClosed 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	defer fmt.Println("finished")
 	go client.readUserInputLoop(ctx)
 	go client.printQueueMsgsLoop(ctx)
 
@@ -204,7 +202,7 @@ func (client *Client) readUserInputLoop(ctx context.Context) {
 			if err != nil {
 				switch err {
 				case ErrUnknownCmd:
-					fmt.Println("Unknown cmd")
+					fmt.Println("Error: unknown command")
 				default:
 					client.errs <- err
 					return
@@ -215,7 +213,6 @@ func (client *Client) readUserInputLoop(ctx context.Context) {
 }
 
 func (client *Client) dispatchUserInput(input string, ctx context.Context) error {
-	fmt.Println("dispatch user input")
 	ctx, cancel := context.WithTimeout(ctx, DispatchUserInputTimeout)
 	defer cancel()
 
