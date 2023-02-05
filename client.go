@@ -300,6 +300,7 @@ func (client *Client) dispatchSendCmd(cmd Cmd, args []string, ctx context.Contex
 			return ErrInvalidTopicComponent
 		}
 		key = BindingKeyForRoom(room)
+		client.bindToKey(key)
 		body = strings.Join(args[1:], " ")
 	}
 	return client.sendMsg(key, body, ctx)
