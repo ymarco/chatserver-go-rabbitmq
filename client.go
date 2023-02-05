@@ -33,8 +33,8 @@ func NewClient(conn *amqp.Connection, name string) (*Client, error) {
 	err = ch.ExchangeDeclare(
 		exchangeName,
 		"topic", // type
-		false,   // durable
-		true,    // auto-deleted
+		true,    // durable
+		false,   // auto-deleted
 		false,   // internal
 		false,   // no-wait
 		nil,     // arguments
@@ -45,9 +45,9 @@ func NewClient(conn *amqp.Connection, name string) (*Client, error) {
 
 	q, err := ch.QueueDeclare(
 		name,  // name
-		false, // durable
+		true,  // durable
 		false, // delete when unused
-		true,  // exclusive
+		false, // exclusive
 		false, // no-wait
 		nil,   // arguments
 	)
