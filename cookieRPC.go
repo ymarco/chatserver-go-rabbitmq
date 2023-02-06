@@ -59,6 +59,10 @@ func (client *Client) handleIncomingCookieRequestsLoop(ctx context.Context) erro
 	if err != nil {
 		return err
 	}
+	go printOurRejectedRepliesLoop(ch, ctx)
+	return client.replyToCookieRequestsLoop(ch, msgs, ctx)
+}
+func (client *Client) replyToCookieRequestsLoop(ch *amqp.Channel, msgs <-chan amqp.Delivery, ctx context.Context) error {
 	for {
 		select {
 		case <-ctx.Done():
@@ -71,6 +75,21 @@ func (client *Client) handleIncomingCookieRequestsLoop(ctx context.Context) erro
 			if err != nil {
 				return err
 			}
+		}
+	}
+}
+
+func printOurRejectedRepliesLoop(ch *amqp.Channel, ctx context.Context) {
+	returnedMsgs := ch.NotifyReturn(make(chan amqp.Return, 1))
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case msg, ok := <-returnedMsgs:
+			if !ok {
+				return
+			}
+			log.Printf("Couldn't reply with our cookie to %s\n", msg.ReplyTo)
 		}
 	}
 }
@@ -131,7 +150,7 @@ func (client *Client) handleOutgoingCookieRequestsLoop(ctx context.Context) erro
 	if err != nil {
 		return err
 	}
-
+	go printOurRejectedRequestsLoop(ch, ctx)
 	for {
 		username := ""
 		select {
@@ -148,6 +167,21 @@ func (client *Client) handleOutgoingCookieRequestsLoop(ctx context.Context) erro
 			return err
 		}
 		log.Printf("%s's cookie is %s\n", username, cookie)
+	}
+}
+
+func printOurRejectedRequestsLoop(ch *amqp.Channel, ctx context.Context) {
+	returnedMsgs := ch.NotifyReturn(make(chan amqp.Return, 1))
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case msg, ok := <-returnedMsgs:
+			if !ok {
+				return
+			}
+			log.Printf("Couldn't request cookie from %s\n", msg.RoutingKey)
+		}
 	}
 }
 

@@ -163,7 +163,6 @@ func RunClientUntilChannelClosed(name, cookie string, conn *amqp.Connection, con
 
 	go client.sendErrOnChan(client.readUserInputLoop, ctx)
 	go client.sendErrOnChan(client.printChatMsgsLoop, ctx)
-	go client.sendErrOnChan(client.printReturendMsgsLoop, ctx)
 	go client.sendErrOnChan(client.handleIncomingCookieRequestsLoop, ctx)
 	go client.sendErrOnChan(client.handleOutgoingCookieRequestsLoop, ctx)
 
@@ -190,6 +189,7 @@ func (client *Client) readUserInputLoop(ctx context.Context) error {
 	}
 	defer ClosePrintErr(ch)
 
+	go client.printReturendChatMsgsLoop(ch, ctx)
 	scanner := bufio.NewScanner(os.Stdin)
 	userInput := ReadAsyncIntoChan(scanner)
 	for {
@@ -381,35 +381,20 @@ func (client *Client) printChatMsgsLoop(ctx context.Context) error {
 	}
 }
 
-func (client *Client) printReturendMsgsLoop(ctx context.Context) error {
-	ch, err := client.conn.Channel()
-	if err != nil {
-		return err
-	}
-	defer ClosePrintErr(ch)
-
-	returned := make(chan amqp.Return)
-	ch.NotifyReturn(returned)
+func (client *Client) printReturendChatMsgsLoop(ch *amqp.Channel, ctx context.Context) error {
+	returnedMsgs := ch.NotifyReturn(make(chan amqp.Return))
 	for {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
-		case msg, ok := <-returned:
+		case msg, ok := <-returnedMsgs:
 			if !ok {
 				return ErrChannelClosed
 			}
-			switch msg.Exchange {
-			case msgsExchangeName:
-				log.Printf("Couldn't send msg on %s: %s\n", msg.RoutingKey, msg.Body)
-			case cookieExchangeName:
-				if msg.ReplyTo != "" {
-					log.Printf("Couldn't request cookie from %s\n", msg.RoutingKey)
-				} else if msg.CorrelationId != "" {
-					log.Printf("Couldn't reply with our cookie to %s\n", msg.RoutingKey)
-				} else {
-					panic("unreachable")
-				}
+			if msg.Exchange != msgsExchangeName {
+				panic("the only messages send on this channel should be chat messages")
 			}
+			log.Printf("Couldn't send msg on %s: %s\n", msg.RoutingKey, msg.Body)
 		}
 	}
 
