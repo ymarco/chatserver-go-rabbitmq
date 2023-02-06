@@ -9,11 +9,11 @@ import (
 	amqp "github.com/rabbitmq/amqp091-go"
 )
 
-func (client *Client) GetSenderRPCQueueName() string {
+func (client *Client) RepliesQueueName() string {
 	return client.name + "_cookieRPCSender"
 }
 
-func (client *Client) GetReplyToAddress() string {
+func (client *Client) ReplyToAddress() string {
 	return client.name + "_cookieRPCReplyTo"
 }
 func (client *Client) GetListenerRPCQueueName() string {
@@ -118,20 +118,25 @@ func (client *Client) handleOutgoingCookieRequestsLoop(ctx context.Context) erro
 	defer ClosePrintErr(ch)
 
 	repliesQueue, err := ch.QueueDeclare(
-		client.GetSenderRPCQueueName(), // name
-		false,                          // durable
-		false,                          // auto-delete
-		true,                           // exclusive
-		false,                          // no-wait
-		nil,                            // args
+		client.RepliesQueueName(), // name
+		false,                     // durable
+		false,                     // auto-delete
+		true,                      // exclusive
+		false,                     // no-wait
+		nil,                       // args
 	)
 	if err != nil {
 		return err
 	}
-	defer ch.QueueDelete(repliesQueue.Name, false, false, false)
+	defer func() {
+		_, err := ch.QueueDelete(repliesQueue.Name, false, false, false)
+		if err != nil {
+			log.Println("couldn't close replies queue", err)
+		}
+	}()
 	err = ch.QueueBind(
-		repliesQueue.Name,          // queue name
-		client.GetReplyToAddress(), // routing key
+		repliesQueue.Name,       // queue name
+		client.ReplyToAddress(), // routing key
 		cookieExchangeName,
 		false, // no-wait
 		nil,   // args
@@ -156,14 +161,14 @@ func (client *Client) handleOutgoingCookieRequestsLoop(ctx context.Context) erro
 
 func (client *Client) sendCookieRequestsLoop(ch *amqp.Channel, ctx context.Context, replies <-chan amqp.Delivery) error {
 	for {
-		username := ""
+		targetUsername := ""
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
-		case username = <-client.askForCookie:
+		case targetUsername = <-client.requestACookieFromUsername:
 		}
 
-		id, err := client.requestCookie(ch, username, ctx)
+		id, err := client.requestCookie(ch, targetUsername, ctx)
 		if err != nil {
 			return err
 		}
@@ -171,7 +176,7 @@ func (client *Client) sendCookieRequestsLoop(ch *amqp.Channel, ctx context.Conte
 		if err != nil {
 			return err
 		}
-		log.Printf("%s's cookie is %s\n", username, cookie)
+		log.Printf("%s's cookie is %s\n", targetUsername, cookie)
 	}
 }
 func printOurRejectedRequestsLoop(ch *amqp.Channel, ctx context.Context) {
@@ -205,7 +210,7 @@ func (client *Client) requestCookie(ch *amqp.Channel, user string, ctx context.C
 		amqp.Publishing{
 			ContentType:   "text/plain",
 			CorrelationId: correlationID,
-			ReplyTo:       client.GetReplyToAddress(),
+			ReplyTo:       client.ReplyToAddress(),
 			Body:          nil,
 		})
 	if err != nil {
