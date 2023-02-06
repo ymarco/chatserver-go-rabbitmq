@@ -190,7 +190,7 @@ func (client *Client) executeUserInputLoop(ctx context.Context) error {
 	}
 	defer ClosePrintErr(ch)
 
-	go client.printReturendChatMsgsLoop(ch, ctx)
+	go client.printReturnedChatMsgsLoop(ch, ctx)
 	userInput := ReadAsyncIntoChan(bufio.NewScanner(os.Stdin))
 	for {
 		select {
@@ -381,7 +381,7 @@ func (client *Client) printChatMsgsLoop(ctx context.Context) error {
 	}
 }
 
-func (client *Client) printReturendChatMsgsLoop(ch *amqp.Channel, ctx context.Context) {
+func (client *Client) printReturnedChatMsgsLoop(ch *amqp.Channel, ctx context.Context) {
 	returnedMsgs := ch.NotifyReturn(make(chan amqp.Return))
 	for {
 		select {
