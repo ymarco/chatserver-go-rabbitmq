@@ -152,7 +152,6 @@ func RunClientUntilChannelClosed(name, cookie string, conn *amqp.Connection, con
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	close(client.errs)
 	channels := make([]*amqp.Channel, 5)
 	for i := 0; i < 5; i++ {
 		ch, err := conn.Channel()
@@ -168,7 +167,7 @@ func RunClientUntilChannelClosed(name, cookie string, conn *amqp.Connection, con
 	go client.printReturendMsgsLoop(channels[2], ctx)
 	go client.handleIncomingCookieRequestsLoop(channels[3], ctx)
 	go client.handleOutgoingCookieRequestsLoop(channels[4], ctx)
-	time.Sleep(20 * time.Second)
+
 
 	select {
 	case err := <-connClosed:
@@ -262,7 +261,7 @@ func (client *Client) dispatchCmd(ch *amqp.Channel, cmd Cmd, args []string, ctx 
 
 func (client *Client) dispatchRequestCookieCmd(args []string) error {
 	if len(args) != 1 {
-		fmt.Println("Request cookie needs 1 arg: USERNAME")
+		fmt.Println("Error: request_cookie needs 1 arg: USERNAME")
 		return nil
 	}
 	username := args[0]

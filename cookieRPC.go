@@ -13,11 +13,10 @@ func (client *Client) GetSenderRPCQueueName() string {
 	return client.name + "_cookieRPCSender"
 }
 
-func (client *Client) GetListenerRPCQueueName() string {
-	return client.name + "_cookieRPCListener"
+func (client *Client) GetReplyToAddress() string {
+	return client.name + "_cookieRPCReplyTo"
 }
-
-func (client *Client) getRPCListenerBindingKey() string {
+func (client *Client) GetListenerRPCQueueName() string {
 	return client.name + "_cookieRPCListener"
 }
 
@@ -36,8 +35,8 @@ func (client *Client) handleIncomingCookieRequestsLoop(ch *amqp.Channel, ctx con
 	}
 	defer ch.QueueDelete(q.Name, false, false, false)
 	err = ch.QueueBind(
-		q.Name,                            // queue name
-		client.getRPCListenerBindingKey(), // routing key
+		q.Name,      // queue name
+		client.name, // routing key
 		cookieExchangeName,
 		false, // no-wait
 		nil,   // args
@@ -75,6 +74,7 @@ func (client *Client) handleIncomingCookieRequestsLoop(ch *amqp.Channel, ctx con
 }
 
 func (client *Client) replyToCookieRPCRequest(ch *amqp.Channel, delivery amqp.Delivery, ctx context.Context) error {
+	log.Printf("Replying with our cookie to %s\n", delivery.ReplyTo)
 	return ch.PublishWithContext(
 		ctx,
 		cookieExchangeName,
@@ -104,8 +104,8 @@ func (client *Client) handleOutgoingCookieRequestsLoop(ch *amqp.Channel, ctx con
 	}
 	defer ch.QueueDelete(q.Name, false, false, false)
 	err = ch.QueueBind(
-		q.Name,      // queue name
-		client.name, // routing key
+		q.Name,                     // queue name
+		client.GetReplyToAddress(), // routing key
 		cookieExchangeName,
 		false, // no-wait
 		nil,   // args
@@ -164,7 +164,7 @@ func (client *Client) requestCookie(ch *amqp.Channel, user string, ctx context.C
 		amqp.Publishing{
 			ContentType:   "text/plain",
 			CorrelationId: correlationID,
-			ReplyTo:       client.name,
+			ReplyTo:       client.GetReplyToAddress(),
 			Body:          nil,
 		})
 	if err != nil {
