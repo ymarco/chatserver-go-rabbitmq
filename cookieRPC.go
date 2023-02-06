@@ -155,11 +155,11 @@ func (client *Client) handleOutgoingCookieRequestsLoop(ctx context.Context) erro
 	if err != nil {
 		return err
 	}
-	go printOurRejectedRequestsLoop(ch, ctx)
 	return client.sendCookieRequestsLoop(ch, ctx, replies)
 }
 
 func (client *Client) sendCookieRequestsLoop(ch *amqp.Channel, ctx context.Context, replies <-chan amqp.Delivery) error {
+	returnedMsgs := ch.NotifyReturn(make(chan amqp.Return, 1))
 	for {
 		targetUsername := ""
 		select {
@@ -172,25 +172,15 @@ func (client *Client) sendCookieRequestsLoop(ch *amqp.Channel, ctx context.Conte
 		if err != nil {
 			return err
 		}
-		cookie, err := client.expectReply(replies, id, ctx)
+		cookie, err := client.expectReply(replies, returnedMsgs, id, ctx)
 		if err != nil {
+			if err == ErrMsgWasReturned {
+				log.Println(err)
+				continue
+			}
 			return err
 		}
 		log.Printf("%s's cookie is %s\n", targetUsername, cookie)
-	}
-}
-func printOurRejectedRequestsLoop(ch *amqp.Channel, ctx context.Context) {
-	returnedMsgs := ch.NotifyReturn(make(chan amqp.Return, 1))
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case msg, ok := <-returnedMsgs:
-			if !ok {
-				return
-			}
-			log.Printf("Couldn't request cookie from %s\n", msg.RoutingKey)
-		}
 	}
 }
 
@@ -222,19 +212,31 @@ func (client *Client) requestCookie(ch *amqp.Channel, user string, ctx context.C
 
 var ErrChannelClosed = errors.New("channel closed")
 var ErrUnexpectedCorrelationId = errors.New("channel closed")
+var ErrMsgWasReturned = errors.New("message didn't find a destination and was returned")
 
-func (client *Client) expectReply(msgs <-chan amqp.Delivery, id string, ctx context.Context) (cookie string, err error) {
-	select {
-	case <-ctx.Done():
-		return "", ctx.Err()
-	case delivery, ok := <-msgs:
-		if !ok {
-			return "", ErrChannelClosed
-		}
-		if delivery.CorrelationId == id {
-			return string(delivery.Body), nil
-		} else {
-			return "", ErrUnexpectedCorrelationId
+func (client *Client) expectReply(msgs <-chan amqp.Delivery, returnedMsgs <-chan amqp.Return, id string, ctx context.Context) (cookie string, err error) {
+	for {
+		select {
+		case <-ctx.Done():
+			return "", ctx.Err()
+		case returnedMsg, ok := <-returnedMsgs:
+			if !ok {
+				return "", ErrChannelClosed
+			}
+			if returnedMsg.CorrelationId == id {
+				return "", ErrMsgWasReturned
+			} else {
+				continue
+			}
+		case delivery, ok := <-msgs:
+			if !ok {
+				return "", ErrChannelClosed
+			}
+			if delivery.CorrelationId == id {
+				return string(delivery.Body), nil
+			} else {
+				continue // leftover message, should not error (see rmq docs)
+			}
 		}
 	}
 }
