@@ -158,21 +158,11 @@ func RunClientUntilChannelClosed(name, cookie string, conn *amqp.Connection, con
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	channels := make([]*amqp.Channel, 5)
-	for i := 0; i < 5; i++ {
-		ch, err := conn.Channel()
-		if err != nil {
-			log.Fatalln(err)
-		}
-		channels[i] = ch
-		defer ClosePrintErr(channels[i])
-	}
-
-	go client.sendErrOnChan(client.readUserInputLoop(channels[0], ctx))
-	go client.sendErrOnChan(client.printQueueMsgsLoop(channels[1], ctx))
-	go client.sendErrOnChan(client.printReturendMsgsLoop(channels[2], ctx))
-	go client.sendErrOnChan(client.handleIncomingCookieRequestsLoop(channels[3], ctx))
-	go client.sendErrOnChan(client.handleOutgoingCookieRequestsLoop(channels[4], ctx))
+	go client.sendErrOnChan(client.readUserInputLoop(ctx))
+	go client.sendErrOnChan(client.printQueueMsgsLoop(ctx))
+	go client.sendErrOnChan(client.printReturendMsgsLoop(ctx))
+	go client.sendErrOnChan(client.handleIncomingCookieRequestsLoop(ctx))
+	go client.sendErrOnChan(client.handleOutgoingCookieRequestsLoop(ctx))
 
 	select {
 	case err := <-connClosed:
@@ -190,7 +180,13 @@ func RunClientUntilChannelClosed(name, cookie string, conn *amqp.Connection, con
 
 const DispatchUserInputTimeout = 200 * time.Millisecond
 
-func (client *Client) readUserInputLoop(ch *amqp.Channel, ctx context.Context) error {
+func (client *Client) readUserInputLoop(ctx context.Context) error {
+	ch, err := client.conn.Channel()
+	if err != nil {
+		return err
+	}
+	defer ClosePrintErr(ch)
+
 	scanner := bufio.NewScanner(os.Stdin)
 	userInput := ReadAsyncIntoChan(scanner)
 	for {
@@ -337,7 +333,13 @@ func (client *Client) dispatchSendCmd(ch *amqp.Channel, cmd Cmd, args []string, 
 
 var ErrNoSender = errors.New("msg header doesn't contain a sender")
 
-func (client *Client) printQueueMsgsLoop(ch *amqp.Channel, ctx context.Context) error {
+func (client *Client) printQueueMsgsLoop(ctx context.Context) error {
+	ch, err := client.conn.Channel()
+	if err != nil {
+		return err
+	}
+	defer ClosePrintErr(ch)
+
 	msgs, err := ch.Consume(
 		client.receiveMsgsQueue.Name, // queue
 		client.name,                  // consumer
@@ -376,7 +378,13 @@ func (client *Client) printQueueMsgsLoop(ch *amqp.Channel, ctx context.Context) 
 	}
 }
 
-func (client *Client) printReturendMsgsLoop(ch *amqp.Channel, ctx context.Context) error {
+func (client *Client) printReturendMsgsLoop(ctx context.Context) error {
+	ch, err := client.conn.Channel()
+	if err != nil {
+		return err
+	}
+	defer ClosePrintErr(ch)
+
 	returned := make(chan amqp.Return)
 	ch.NotifyReturn(returned)
 	for {

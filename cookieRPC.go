@@ -20,7 +20,13 @@ func (client *Client) GetListenerRPCQueueName() string {
 	return client.name + "_cookieRPCListener"
 }
 
-func (client *Client) handleIncomingCookieRequestsLoop(ch *amqp.Channel, ctx context.Context) error {
+func (client *Client) handleIncomingCookieRequestsLoop(ctx context.Context) error {
+	ch, err := client.conn.Channel()
+	if err != nil {
+		return err
+	}
+	defer ClosePrintErr(ch)
+
 	q, err := ch.QueueDeclare(
 		client.GetListenerRPCQueueName(), // name
 		false,                            // durable
@@ -85,7 +91,13 @@ func (client *Client) replyToCookieRPCRequest(ch *amqp.Channel, delivery amqp.De
 	)
 }
 
-func (client *Client) handleOutgoingCookieRequestsLoop(ch *amqp.Channel, ctx context.Context) error {
+func (client *Client) handleOutgoingCookieRequestsLoop(ctx context.Context) error {
+	ch, err := client.conn.Channel()
+	if err != nil {
+		return err
+	}
+	defer ClosePrintErr(ch)
+
 	q, err := ch.QueueDeclare(
 		client.GetSenderRPCQueueName(), // name
 		false,                          // durable
