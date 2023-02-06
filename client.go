@@ -143,6 +143,12 @@ const (
 	ReconnectActionShouldQuit
 )
 
+func (client *Client) sendErrOnChan(err error) {
+	if err != nil {
+		client.errs <- err
+	}
+}
+
 func RunClientUntilChannelClosed(name, cookie string, conn *amqp.Connection, connClosed chan *amqp.Error) ReconnectAction {
 	client, err := NewClient(conn, name, cookie)
 	if err != nil {
@@ -162,12 +168,11 @@ func RunClientUntilChannelClosed(name, cookie string, conn *amqp.Connection, con
 		defer ClosePrintErr(channels[i])
 	}
 
-	go client.readUserInputLoop(channels[0], ctx)
-	go client.printQueueMsgsLoop(channels[1], ctx)
-	go client.printReturendMsgsLoop(channels[2], ctx)
-	go client.handleIncomingCookieRequestsLoop(channels[3], ctx)
-	go client.handleOutgoingCookieRequestsLoop(channels[4], ctx)
-
+	go client.sendErrOnChan(client.readUserInputLoop(channels[0], ctx))
+	go client.sendErrOnChan(client.printQueueMsgsLoop(channels[1], ctx))
+	go client.sendErrOnChan(client.printReturendMsgsLoop(channels[2], ctx))
+	go client.sendErrOnChan(client.handleIncomingCookieRequestsLoop(channels[3], ctx))
+	go client.sendErrOnChan(client.handleOutgoingCookieRequestsLoop(channels[4], ctx))
 
 	select {
 	case err := <-connClosed:
@@ -185,21 +190,20 @@ func RunClientUntilChannelClosed(name, cookie string, conn *amqp.Connection, con
 
 const DispatchUserInputTimeout = 200 * time.Millisecond
 
-func (client *Client) readUserInputLoop(ch *amqp.Channel, ctx context.Context) {
+func (client *Client) readUserInputLoop(ch *amqp.Channel, ctx context.Context) error {
 	scanner := bufio.NewScanner(os.Stdin)
 	userInput := ReadAsyncIntoChan(scanner)
 	for {
 		select {
 		case <-ctx.Done():
-			return
+			return ctx.Err()
 		case input := <-userInput:
 			if input.Err != nil {
 				if input.Err == io.EOF {
 					client.quit <- struct{}{}
-					return
+					return nil
 				}
-				client.errs <- input.Err
-				return
+				return input.Err
 			}
 
 			err := client.dispatchUserInput(input.Val, ch, ctx)
@@ -208,8 +212,7 @@ func (client *Client) readUserInputLoop(ch *amqp.Channel, ctx context.Context) {
 				case ErrUnknownCmd:
 					fmt.Println("Error: unknown command")
 				default:
-					client.errs <- err
-					return
+					return err
 				}
 			}
 		}
@@ -334,7 +337,7 @@ func (client *Client) dispatchSendCmd(ch *amqp.Channel, cmd Cmd, args []string, 
 
 var ErrNoSender = errors.New("msg header doesn't contain a sender")
 
-func (client *Client) printQueueMsgsLoop(ch *amqp.Channel, ctx context.Context) {
+func (client *Client) printQueueMsgsLoop(ch *amqp.Channel, ctx context.Context) error {
 	msgs, err := ch.Consume(
 		client.receiveMsgsQueue.Name, // queue
 		client.name,                  // consumer
@@ -345,9 +348,7 @@ func (client *Client) printQueueMsgsLoop(ch *amqp.Channel, ctx context.Context) 
 		nil,                          // args
 	)
 	if err != nil {
-		fmt.Println(err)
-		client.errs <- err
-		return
+		return err
 	}
 	defer func() {
 		if err := ch.Cancel(client.name, true); err != nil {
@@ -359,33 +360,32 @@ func (client *Client) printQueueMsgsLoop(ch *amqp.Channel, ctx context.Context) 
 		select {
 		case msg, ok := <-msgs:
 			if !ok {
-				return
+				return ErrChannelClosed
 			}
 			sender, ok := msg.Headers["sender"]
 			if !ok {
-				client.errs <- ErrNoSender
-				return
+				return ErrNoSender
 			}
 			if sender == client.name {
 				continue
 			}
 			log.Printf("%s (on %s): %s", sender, msg.RoutingKey, msg.Body)
 		case <-ctx.Done():
-			return
+			return ctx.Err()
 		}
 	}
 }
 
-func (client *Client) printReturendMsgsLoop(ch *amqp.Channel, ctx context.Context) {
+func (client *Client) printReturendMsgsLoop(ch *amqp.Channel, ctx context.Context) error {
 	returned := make(chan amqp.Return)
 	ch.NotifyReturn(returned)
 	for {
 		select {
 		case <-ctx.Done():
-			return
+			return ctx.Err()
 		case msg, ok := <-returned:
 			if !ok {
-				return
+				return ErrChannelClosed
 			}
 			switch msg.Exchange {
 			case msgsExchangeName:

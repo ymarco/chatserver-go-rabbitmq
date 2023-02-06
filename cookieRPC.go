@@ -20,7 +20,7 @@ func (client *Client) GetListenerRPCQueueName() string {
 	return client.name + "_cookieRPCListener"
 }
 
-func (client *Client) handleIncomingCookieRequestsLoop(ch *amqp.Channel, ctx context.Context) {
+func (client *Client) handleIncomingCookieRequestsLoop(ch *amqp.Channel, ctx context.Context) error {
 	q, err := ch.QueueDeclare(
 		client.GetListenerRPCQueueName(), // name
 		false,                            // durable
@@ -30,8 +30,7 @@ func (client *Client) handleIncomingCookieRequestsLoop(ch *amqp.Channel, ctx con
 		nil,                              // args
 	)
 	if err != nil {
-		client.errs <- err
-		return
+		return err
 	}
 	defer ch.QueueDelete(q.Name, false, false, false)
 	err = ch.QueueBind(
@@ -42,8 +41,7 @@ func (client *Client) handleIncomingCookieRequestsLoop(ch *amqp.Channel, ctx con
 		nil,   // args
 	)
 	if err != nil {
-		client.errs <- err
-		return
+		return err
 	}
 	msgs, err := ch.Consume(q.Name, "",
 		true,  // auto-ack
@@ -53,21 +51,19 @@ func (client *Client) handleIncomingCookieRequestsLoop(ch *amqp.Channel, ctx con
 		nil,   // args
 	)
 	if err != nil {
-		client.errs <- err
-		return
+		return err
 	}
 	for {
 		select {
 		case <-ctx.Done():
-			return
+			return ctx.Err()
 		case delivery, ok := <-msgs:
 			if !ok {
-				return
+				return ErrChannelClosed
 			}
 			err := client.replyToCookieRPCRequest(ch, delivery, ctx)
 			if err != nil {
-				client.errs <- err
-				return
+				return err
 			}
 		}
 	}
@@ -89,7 +85,7 @@ func (client *Client) replyToCookieRPCRequest(ch *amqp.Channel, delivery amqp.De
 	)
 }
 
-func (client *Client) handleOutgoingCookieRequestsLoop(ch *amqp.Channel, ctx context.Context) {
+func (client *Client) handleOutgoingCookieRequestsLoop(ch *amqp.Channel, ctx context.Context) error {
 	q, err := ch.QueueDeclare(
 		client.GetSenderRPCQueueName(), // name
 		false,                          // durable
@@ -99,8 +95,7 @@ func (client *Client) handleOutgoingCookieRequestsLoop(ch *amqp.Channel, ctx con
 		nil,                            // args
 	)
 	if err != nil {
-		client.errs <- err
-		return
+		return err
 	}
 	defer ch.QueueDelete(q.Name, false, false, false)
 	err = ch.QueueBind(
@@ -112,8 +107,7 @@ func (client *Client) handleOutgoingCookieRequestsLoop(ch *amqp.Channel, ctx con
 	)
 
 	if err != nil {
-		client.errs <- err
-		return
+		return err
 	}
 	msgs, err := ch.Consume(q.Name, "",
 		true,  // auto-ack
@@ -123,26 +117,23 @@ func (client *Client) handleOutgoingCookieRequestsLoop(ch *amqp.Channel, ctx con
 		nil,   // args
 	)
 	if err != nil {
-		client.errs <- err
-		return
+		return err
 	}
 
 	for {
 		username := ""
 		select {
 		case <-ctx.Done():
-			return
+			return ctx.Err()
 		case username = <-client.askForCookie:
 		}
 		id, err := client.requestCookie(ch, username, ctx)
 		if err != nil {
-			client.errs <- err
-			return
+			return err
 		}
 		cookie, err := client.expectResponse(msgs, id, ctx)
 		if err != nil {
-			client.errs <- err
-			return
+			return err
 		}
 		log.Printf("%s's cookie is %s\n", username, cookie)
 	}
