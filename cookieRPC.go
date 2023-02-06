@@ -21,8 +21,8 @@ func (client *Client) getRPCListenerBindingKey() string {
 	return client.name + "_cookieRPCListener"
 }
 
-func (client *Client) handleIncomingCookieRequestsLoop(ctx context.Context) {
-	q, err := client.ch.QueueDeclare(
+func (client *Client) handleIncomingCookieRequestsLoop(ch *amqp.Channel, ctx context.Context) {
+	q, err := ch.QueueDeclare(
 		client.GetListenerRPCQueueName(), // name
 		false,                            // durable
 		false,                            // auto-delete
@@ -34,8 +34,8 @@ func (client *Client) handleIncomingCookieRequestsLoop(ctx context.Context) {
 		client.errs <- err
 		return
 	}
-	defer client.ch.QueueDelete(q.Name, false, false, false)
-	err = client.ch.QueueBind(
+	defer ch.QueueDelete(q.Name, false, false, false)
+	err = ch.QueueBind(
 		q.Name,                            // queue name
 		client.getRPCListenerBindingKey(), // routing key
 		cookieExchangeName,
@@ -46,7 +46,7 @@ func (client *Client) handleIncomingCookieRequestsLoop(ctx context.Context) {
 		client.errs <- err
 		return
 	}
-	msgs, err := client.ch.Consume(q.Name, "",
+	msgs, err := ch.Consume(q.Name, "",
 		true,  // auto-ack
 		true,  // exclusive
 		false, // no-local
@@ -65,7 +65,7 @@ func (client *Client) handleIncomingCookieRequestsLoop(ctx context.Context) {
 			if !ok {
 				return
 			}
-			err := client.replyToCookieRPCRequest(delivery, ctx)
+			err := client.replyToCookieRPCRequest(ch, delivery, ctx)
 			if err != nil {
 				client.errs <- err
 				return
@@ -74,8 +74,8 @@ func (client *Client) handleIncomingCookieRequestsLoop(ctx context.Context) {
 	}
 }
 
-func (client *Client) replyToCookieRPCRequest(delivery amqp.Delivery, ctx context.Context) error {
-	return client.ch.PublishWithContext(
+func (client *Client) replyToCookieRPCRequest(ch *amqp.Channel, delivery amqp.Delivery, ctx context.Context) error {
+	return ch.PublishWithContext(
 		ctx,
 		cookieExchangeName,
 		delivery.ReplyTo, // routing key
@@ -89,8 +89,8 @@ func (client *Client) replyToCookieRPCRequest(delivery amqp.Delivery, ctx contex
 	)
 }
 
-func (client *Client) handleOutgoingCookieRequestsLoop(ctx context.Context) {
-	q, err := client.ch.QueueDeclare(
+func (client *Client) handleOutgoingCookieRequestsLoop(ch *amqp.Channel, ctx context.Context) {
+	q, err := ch.QueueDeclare(
 		client.GetSenderRPCQueueName(), // name
 		false,                          // durable
 		false,                          // auto-delete
@@ -102,8 +102,8 @@ func (client *Client) handleOutgoingCookieRequestsLoop(ctx context.Context) {
 		client.errs <- err
 		return
 	}
-	defer client.ch.QueueDelete(q.Name, false, false, false)
-	err = client.ch.QueueBind(
+	defer ch.QueueDelete(q.Name, false, false, false)
+	err = ch.QueueBind(
 		q.Name,      // queue name
 		client.name, // routing key
 		cookieExchangeName,
@@ -115,7 +115,7 @@ func (client *Client) handleOutgoingCookieRequestsLoop(ctx context.Context) {
 		client.errs <- err
 		return
 	}
-	msgs, err := client.ch.Consume(q.Name, "",
+	msgs, err := ch.Consume(q.Name, "",
 		true,  // auto-ack
 		true,  // exclusive
 		false, // no-local
@@ -134,7 +134,7 @@ func (client *Client) handleOutgoingCookieRequestsLoop(ctx context.Context) {
 			return
 		case username = <-client.askForCookie:
 		}
-		id, err := client.requestCookie(username, ctx)
+		id, err := client.requestCookie(ch, username, ctx)
 		if err != nil {
 			client.errs <- err
 			return
@@ -154,9 +154,9 @@ func getGlobalId() string {
 	return strconv.FormatInt(globalIdInt, 10)
 }
 
-func (client *Client) requestCookie(user string, ctx context.Context) (correlationID string, err error) {
+func (client *Client) requestCookie(ch *amqp.Channel, user string, ctx context.Context) (correlationID string, err error) {
 	correlationID = getGlobalId()
-	err = client.ch.PublishWithContext(ctx,
+	err = ch.PublishWithContext(ctx,
 		cookieExchangeName, // exchange
 		user,               // routing key
 		true,               // mandatory

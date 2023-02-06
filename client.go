@@ -15,14 +15,13 @@ import (
 )
 
 type Client struct {
-	name         string
-	cookie       string
-	askForCookie chan string
-	conn         *amqp.Connection
-	ch           *amqp.Channel
-	q            amqp.Queue
-	errs         chan error
-	quit         chan struct{}
+	name             string
+	cookie           string
+	askForCookie     chan string
+	conn             *amqp.Connection
+	receiveMsgsQueue amqp.Queue
+	errs             chan error
+	quit             chan struct{}
 }
 
 func NewClient(conn *amqp.Connection, name, cookie string) (*Client, error) {
@@ -30,7 +29,7 @@ func NewClient(conn *amqp.Connection, name, cookie string) (*Client, error) {
 	if err != nil {
 		return nil, err
 	}
-
+	defer ClosePrintErr(ch)
 	err = ch.ExchangeDeclare(
 		msgsExchangeName,
 		"topic", // type
@@ -67,30 +66,27 @@ func NewClient(conn *amqp.Connection, name, cookie string) (*Client, error) {
 	}
 
 	return &Client{name, cookie, make(chan string, 1),
-		conn, ch, q, make(chan error, 1), make(chan struct{}, 1)}, nil
+		conn, q, make(chan error, 1), make(chan struct{}, 1)}, nil
 }
 
-func (client *Client) Close() error {
-	return client.ch.Close()
-}
-
-func (client *Client) bindToKey(key BindingKey) error {
+func (client *Client) bindToKey(ch *amqp.Channel, key BindingKey) error {
 	log.Printf("Bound to %s\n", key)
-	return client.ch.QueueBind(
-		client.q.Name, // queue name
-		string(key),   // routing key
+	return ch.QueueBind(
+		client.receiveMsgsQueue.Name, // queue name
+		string(key),                  // routing key
 		msgsExchangeName,
 		false,
 		nil)
 }
-func (client *Client) unbindFromKey(key BindingKey) error {
+
+func (client *Client) unbindFromKey(ch *amqp.Channel, key BindingKey) error {
 	log.Printf("Unbound from %s\n", key)
-	return client.ch.QueueUnbind(client.q.Name, string(key), msgsExchangeName, nil)
+	return ch.QueueUnbind(client.receiveMsgsQueue.Name, string(key), msgsExchangeName, nil)
 }
 
-func (client *Client) sendMsg(key BindingKey, body string, ctx context.Context) error {
+func (client *Client) sendMsg(ch *amqp.Channel, key BindingKey, body string, ctx context.Context) error {
 	log.Printf("Sending on %s\n", key)
-	return client.ch.PublishWithContext(ctx,
+	return ch.PublishWithContext(ctx,
 		msgsExchangeName,
 		string(key),
 		true,  // mandatory
@@ -152,34 +148,26 @@ func RunClientUntilChannelClosed(name, cookie string, conn *amqp.Connection, con
 	if err != nil {
 		log.Fatalln(err)
 	}
-	defer func() {
-		// if the connection was closed e.g. when rabbit terminates, closing the
-		// channel would hang the entire program, so we don't close it then
-		if !conn.IsClosed() {
-			ClosePrintErr(client)
-		}
-	}()
-	chClosed := client.ch.NotifyClose(make(chan *amqp.Error))
-
-	err = client.bindToKey(BindingKeyForGlobalRoom)
-	if err != nil {
-		log.Fatalln(err)
-	}
-	err = client.bindToKey(BindingKeyForPrivateMsg(name))
-	if err != nil {
-		log.Fatalln(err)
-	}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
 	close(client.errs)
+	channels := make([]*amqp.Channel, 5)
+	for i := 0; i < 5; i++ {
+		ch, err := conn.Channel()
+		if err != nil {
+			log.Fatalln(err)
+		}
+		channels[i] = ch
+		defer ClosePrintErr(channels[i])
+	}
 
-	go client.readUserInputLoop(ctx)
-	go client.printQueueMsgsLoop(ctx)
-	go client.printReturendMsgsLoop(ctx)
-	go client.handleIncomingCookieRequestsLoop(ctx)
-	go client.handleOutgoingCookieRequestsLoop(ctx)
+	go client.readUserInputLoop(channels[0], ctx)
+	go client.printQueueMsgsLoop(channels[1], ctx)
+	go client.printReturendMsgsLoop(channels[2], ctx)
+	go client.handleIncomingCookieRequestsLoop(channels[3], ctx)
+	go client.handleOutgoingCookieRequestsLoop(channels[4], ctx)
 	time.Sleep(20 * time.Second)
 
 	select {
@@ -188,11 +176,6 @@ func RunClientUntilChannelClosed(name, cookie string, conn *amqp.Connection, con
 			log.Println(err)
 		}
 		return ReconnectActionShouldReopenConnection
-	case err := <-chClosed:
-		if err != nil {
-			log.Println(err)
-		}
-		return ReconnectActionShouldOnlyReopenChannel
 	case err := <-client.errs:
 		log.Fatalln("final err:", err)
 		return ReconnectActionShouldQuit
@@ -203,7 +186,7 @@ func RunClientUntilChannelClosed(name, cookie string, conn *amqp.Connection, con
 
 const DispatchUserInputTimeout = 200 * time.Millisecond
 
-func (client *Client) readUserInputLoop(ctx context.Context) {
+func (client *Client) readUserInputLoop(ch *amqp.Channel, ctx context.Context) {
 	scanner := bufio.NewScanner(os.Stdin)
 	userInput := ReadAsyncIntoChan(scanner)
 	for {
@@ -220,7 +203,7 @@ func (client *Client) readUserInputLoop(ctx context.Context) {
 				return
 			}
 
-			err := client.dispatchUserInput(input.Val, ctx)
+			err := client.dispatchUserInput(input.Val, ch, ctx)
 			if err != nil {
 				switch err {
 				case ErrUnknownCmd:
@@ -234,15 +217,15 @@ func (client *Client) readUserInputLoop(ctx context.Context) {
 	}
 }
 
-func (client *Client) dispatchUserInput(input string, ctx context.Context) error {
+func (client *Client) dispatchUserInput(input string, ch *amqp.Channel, ctx context.Context) error {
 	ctx, cancel := context.WithTimeout(ctx, DispatchUserInputTimeout)
 	defer cancel()
 
 	if IsCmd(input) {
 		cmd, args := UnserializeStrToCmd(input)
-		return client.dispatchCmd(cmd, args, ctx)
+		return client.dispatchCmd(ch, cmd, args, ctx)
 	} else {
-		return client.sendMsg(BindingKeyForGlobalRoom, input, ctx)
+		return client.sendMsg(ch, BindingKeyForGlobalRoom, input, ctx)
 	}
 }
 
@@ -254,19 +237,19 @@ func isValidBindingKeyComponent(str string) bool {
 
 var ErrInvalidTopicComponent = errors.New("topic components can't contain ., #, *")
 
-func (client *Client) dispatchCmd(cmd Cmd, args []string, ctx context.Context) error {
+func (client *Client) dispatchCmd(ch *amqp.Channel, cmd Cmd, args []string, ctx context.Context) error {
 	switch cmd {
 	case CmdDeleteUser:
 		client.quit <- struct{}{}
-		client.delete()
+		client.delete(ch)
 		return nil
 	case CmdLogout:
 		client.quit <- struct{}{}
 		return nil
 	case CmdJoinRoom, CmdLeaveRoom:
-		return client.dispatchBindCmd(cmd, args)
+		return client.dispatchBindCmd(ch, cmd, args)
 	case CmdSend, CmdSendRoom, CmdWhisper:
-		return client.dispatchSendCmd(cmd, args, ctx)
+		return client.dispatchSendCmd(ch, cmd, args, ctx)
 	case CmdHelp:
 		fmt.Println(helpString)
 		return nil
@@ -290,14 +273,14 @@ func (client *Client) dispatchRequestCookieCmd(args []string) error {
 	return nil // handleOutgoingCookieRequestsLoop does its own printing
 }
 
-func (client *Client) delete() {
-	client.ch.QueueDelete(client.name,
+func (client *Client) delete(ch *amqp.Channel) {
+	ch.QueueDelete(client.name,
 		false, // ifUnused
 		false, // ifEmpty
 		false, // noWait
 	)
 }
-func (client *Client) dispatchBindCmd(cmd Cmd, args []string) error {
+func (client *Client) dispatchBindCmd(ch *amqp.Channel, cmd Cmd, args []string) error {
 	if len(args) != 1 {
 		fmt.Printf("Usage: %s ROOM_NAME\n", CmdJoinRoom)
 		return ErrWrongNumberOfArgs
@@ -308,14 +291,14 @@ func (client *Client) dispatchBindCmd(cmd Cmd, args []string) error {
 	}
 	switch cmd {
 	case CmdJoinRoom:
-		return client.bindToKey(BindingKeyForRoom(key))
+		return client.bindToKey(ch, BindingKeyForRoom(key))
 	case CmdLeaveRoom:
-		return client.unbindFromKey(BindingKeyForRoom(key))
+		return client.unbindFromKey(ch, BindingKeyForRoom(key))
 	}
 	panic("unreachable")
 }
 
-func (client *Client) dispatchSendCmd(cmd Cmd, args []string, ctx context.Context) error {
+func (client *Client) dispatchSendCmd(ch *amqp.Channel, cmd Cmd, args []string, ctx context.Context) error {
 	key := BindingKey("")
 	body := ""
 	switch cmd {
@@ -343,23 +326,24 @@ func (client *Client) dispatchSendCmd(cmd Cmd, args []string, ctx context.Contex
 			return ErrInvalidTopicComponent
 		}
 		key = BindingKeyForRoom(room)
-		client.bindToKey(key)
+		client.bindToKey(ch, key)
+
 		body = strings.Join(args[1:], " ")
 	}
-	return client.sendMsg(key, body, ctx)
+	return client.sendMsg(ch, key, body, ctx)
 }
 
 var ErrNoSender = errors.New("msg header doesn't contain a sender")
 
-func (client *Client) printQueueMsgsLoop(ctx context.Context) {
-	msgs, err := client.ch.Consume(
-		client.q.Name, // queue
-		client.name,   // consumer
-		true,          // auto ack
-		true,          // exclusive
-		false,         // no local
-		false,         // no wait
-		nil,           // args
+func (client *Client) printQueueMsgsLoop(ch *amqp.Channel, ctx context.Context) {
+	msgs, err := ch.Consume(
+		client.receiveMsgsQueue.Name, // queue
+		client.name,                  // consumer
+		true,                         // auto ack
+		true,                         // exclusive
+		false,                        // no local
+		false,                        // no wait
+		nil,                          // args
 	)
 	if err != nil {
 		fmt.Println(err)
@@ -367,7 +351,7 @@ func (client *Client) printQueueMsgsLoop(ctx context.Context) {
 		return
 	}
 	defer func() {
-		if err := client.ch.Cancel(client.name, true); err != nil {
+		if err := ch.Cancel(client.name, true); err != nil {
 			log.Println(err)
 		}
 	}()
@@ -393,9 +377,9 @@ func (client *Client) printQueueMsgsLoop(ctx context.Context) {
 	}
 }
 
-func (client *Client) printReturendMsgsLoop(ctx context.Context) {
+func (client *Client) printReturendMsgsLoop(ch *amqp.Channel, ctx context.Context) {
 	returned := make(chan amqp.Return)
-	client.ch.NotifyReturn(returned)
+	ch.NotifyReturn(returned)
 	for {
 		select {
 		case <-ctx.Done():
