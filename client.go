@@ -143,13 +143,13 @@ const (
 	ReconnectActionShouldQuit
 )
 
-type loopFunc func(ctx context.Context) error
-
-func (client *Client) sendErrOnChan(f loopFunc, ctx context.Context) {
-	err := f(ctx)
-	if err != nil {
-		client.errs <- err
-	}
+func (client *Client) runAsyncAndRouteErrorToChannel(fn func(ctx context.Context) error, ctx context.Context) {
+	go func() {
+		err := fn(ctx)
+		if err != nil {
+			client.errs <- err
+		}
+	}()
 }
 
 func RunClientUntilChannelClosed(name, cookie string, conn *amqp.Connection, connClosed chan *amqp.Error) ReconnectAction {
@@ -161,10 +161,10 @@ func RunClientUntilChannelClosed(name, cookie string, conn *amqp.Connection, con
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	go client.sendErrOnChan(client.readUserInputLoop, ctx)
-	go client.sendErrOnChan(client.printChatMsgsLoop, ctx)
-	go client.sendErrOnChan(client.ReplyToIncomingCookieRequestsLoop, ctx)
-	go client.sendErrOnChan(client.handleOutgoingCookieRequestsLoop, ctx)
+	client.runAsyncAndRouteErrorToChannel(client.readUserInputLoop, ctx)
+	client.runAsyncAndRouteErrorToChannel(client.printChatMsgsLoop, ctx)
+	client.runAsyncAndRouteErrorToChannel(client.ReplyToIncomingCookieRequestsLoop, ctx)
+	client.runAsyncAndRouteErrorToChannel(client.handleOutgoingCookieRequestsLoop, ctx)
 
 	select {
 	case err := <-connClosed:
