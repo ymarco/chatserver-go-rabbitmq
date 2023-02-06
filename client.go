@@ -121,7 +121,7 @@ func RunClientUntilDisconnected(name, cookie string) (shouldReconnect bool) {
 	log.Printf("Connected to %s\n", conn.RemoteAddr())
 
 	for {
-		action := RunClientUntilChannelClosed(name, cookie, conn, connClosed)
+		action := RunClientOnConnection(name, cookie, conn, connClosed)
 		switch action {
 		case ReconnectActionShouldOnlyReopenChannel:
 			fmt.Printf("Channel closed, retrynig in %s\n", channelReconnectDelay)
@@ -152,7 +152,7 @@ func (client *Client) runAsyncAndRouteErrorToChannel(fn func(ctx context.Context
 	}()
 }
 
-func RunClientUntilChannelClosed(name, cookie string, conn *amqp.Connection, connClosed chan *amqp.Error) ReconnectAction {
+func RunClientOnConnection(name, cookie string, conn *amqp.Connection, connClosed chan *amqp.Error) ReconnectAction {
 	client, err := NewClient(conn, name, cookie)
 	if err != nil {
 		log.Fatalln(err)
