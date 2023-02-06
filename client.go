@@ -163,7 +163,7 @@ func RunClientUntilChannelClosed(name, cookie string, conn *amqp.Connection, con
 
 	go client.sendErrOnChan(client.readUserInputLoop, ctx)
 	go client.sendErrOnChan(client.printChatMsgsLoop, ctx)
-	go client.sendErrOnChan(client.handleIncomingCookieRequestsLoop, ctx)
+	go client.sendErrOnChan(client.ReplyToIncomingCookieRequestsLoop, ctx)
 	go client.sendErrOnChan(client.handleOutgoingCookieRequestsLoop, ctx)
 
 	select {

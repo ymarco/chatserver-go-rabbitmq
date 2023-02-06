@@ -20,7 +20,7 @@ func (client *Client) GetListenerRPCQueueName() string {
 	return client.name + "_cookieRPCListener"
 }
 
-func (client *Client) handleIncomingCookieRequestsLoop(ctx context.Context) error {
+func (client *Client) ReplyToIncomingCookieRequestsLoop(ctx context.Context) error {
 	ch, err := client.conn.Channel()
 	if err != nil {
 		return err
@@ -167,7 +167,7 @@ func (client *Client) sendCookieRequestsLoop(ch *amqp.Channel, ctx context.Conte
 		if err != nil {
 			return err
 		}
-		cookie, err := client.expectResponse(replies, id, ctx)
+		cookie, err := client.expectReply(replies, id, ctx)
 		if err != nil {
 			return err
 		}
@@ -218,7 +218,7 @@ func (client *Client) requestCookie(ch *amqp.Channel, user string, ctx context.C
 var ErrChannelClosed = errors.New("channel closed")
 var ErrUnexpectedCorrelationId = errors.New("channel closed")
 
-func (client *Client) expectResponse(msgs <-chan amqp.Delivery, id string, ctx context.Context) (cookie string, err error) {
+func (client *Client) expectReply(msgs <-chan amqp.Delivery, id string, ctx context.Context) (cookie string, err error) {
 	select {
 	case <-ctx.Done():
 		return "", ctx.Err()
