@@ -143,7 +143,10 @@ const (
 	ReconnectActionShouldQuit
 )
 
-func (client *Client) sendErrOnChan(err error) {
+type loopFunc func(ctx context.Context) error
+
+func (client *Client) sendErrOnChan(f loopFunc, ctx context.Context) {
+	err := f(ctx)
 	if err != nil {
 		client.errs <- err
 	}
@@ -158,11 +161,11 @@ func RunClientUntilChannelClosed(name, cookie string, conn *amqp.Connection, con
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	go client.sendErrOnChan(client.readUserInputLoop(ctx))
-	go client.sendErrOnChan(client.printQueueMsgsLoop(ctx))
-	go client.sendErrOnChan(client.printReturendMsgsLoop(ctx))
-	go client.sendErrOnChan(client.handleIncomingCookieRequestsLoop(ctx))
-	go client.sendErrOnChan(client.handleOutgoingCookieRequestsLoop(ctx))
+	go client.sendErrOnChan(client.readUserInputLoop, ctx)
+	go client.sendErrOnChan(client.printChatMsgsLoop, ctx)
+	go client.sendErrOnChan(client.printReturendMsgsLoop, ctx)
+	go client.sendErrOnChan(client.handleIncomingCookieRequestsLoop, ctx)
+	go client.sendErrOnChan(client.handleOutgoingCookieRequestsLoop, ctx)
 
 	select {
 	case err := <-connClosed:
@@ -333,7 +336,7 @@ func (client *Client) dispatchSendCmd(ch *amqp.Channel, cmd Cmd, args []string, 
 
 var ErrNoSender = errors.New("msg header doesn't contain a sender")
 
-func (client *Client) printQueueMsgsLoop(ctx context.Context) error {
+func (client *Client) printChatMsgsLoop(ctx context.Context) error {
 	ch, err := client.conn.Channel()
 	if err != nil {
 		return err
