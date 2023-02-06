@@ -69,7 +69,7 @@ func NewClient(conn *amqp.Connection, name, cookie string) (*Client, error) {
 		conn, q, make(chan error, 1), make(chan struct{}, 1)}, nil
 }
 
-func (client *Client) bindToKey(ch *amqp.Channel, key BindingKey) error {
+func (client *Client) ListenToChatMsgsFrom(ch *amqp.Channel, key BindingKey) error {
 	log.Printf("Bound to %s\n", key)
 	return ch.QueueBind(
 		client.receiveMsgsQueue.Name, // queue name
@@ -79,12 +79,12 @@ func (client *Client) bindToKey(ch *amqp.Channel, key BindingKey) error {
 		nil)
 }
 
-func (client *Client) unbindFromKey(ch *amqp.Channel, key BindingKey) error {
+func (client *Client) DontListenToChatMsgsFrom(ch *amqp.Channel, key BindingKey) error {
 	log.Printf("Unbound from %s\n", key)
 	return ch.QueueUnbind(client.receiveMsgsQueue.Name, string(key), msgsExchangeName, nil)
 }
 
-func (client *Client) sendMsg(ch *amqp.Channel, key BindingKey, body string, ctx context.Context) error {
+func (client *Client) sendChatMsg(ch *amqp.Channel, key BindingKey, body string, ctx context.Context) error {
 	log.Printf("Sending on %s\n", key)
 	return ch.PublishWithContext(ctx,
 		msgsExchangeName,
@@ -225,7 +225,7 @@ func (client *Client) dispatchUserInput(input string, ch *amqp.Channel, ctx cont
 		cmd, args := UnserializeStrToCmd(input)
 		return client.dispatchCmd(ch, cmd, args, ctx)
 	} else {
-		return client.sendMsg(ch, BindingKeyForGlobalRoom, input, ctx)
+		return client.sendChatMsg(ch, BindingKeyForGlobalRoom, input, ctx)
 	}
 }
 
@@ -291,9 +291,9 @@ func (client *Client) dispatchBindCmd(ch *amqp.Channel, cmd Cmd, args []string) 
 	}
 	switch cmd {
 	case CmdJoinRoom:
-		return client.bindToKey(ch, BindingKeyForRoom(key))
+		return client.ListenToChatMsgsFrom(ch, BindingKeyForRoom(key))
 	case CmdLeaveRoom:
-		return client.unbindFromKey(ch, BindingKeyForRoom(key))
+		return client.DontListenToChatMsgsFrom(ch, BindingKeyForRoom(key))
 	}
 	panic("unreachable")
 }
@@ -326,11 +326,11 @@ func (client *Client) dispatchSendCmd(ch *amqp.Channel, cmd Cmd, args []string, 
 			return ErrInvalidTopicComponent
 		}
 		key = BindingKeyForRoom(room)
-		client.bindToKey(ch, key)
+		client.ListenToChatMsgsFrom(ch, key)
 
 		body = strings.Join(args[1:], " ")
 	}
-	return client.sendMsg(ch, key, body, ctx)
+	return client.sendChatMsg(ch, key, body, ctx)
 }
 
 var ErrNoSender = errors.New("msg header doesn't contain a sender")
