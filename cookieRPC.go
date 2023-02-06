@@ -117,7 +117,7 @@ func (client *Client) handleOutgoingCookieRequestsLoop(ctx context.Context) erro
 	}
 	defer ClosePrintErr(ch)
 
-	q, err := ch.QueueDeclare(
+	repliesQueue, err := ch.QueueDeclare(
 		client.GetSenderRPCQueueName(), // name
 		false,                          // durable
 		false,                          // auto-delete
@@ -128,9 +128,9 @@ func (client *Client) handleOutgoingCookieRequestsLoop(ctx context.Context) erro
 	if err != nil {
 		return err
 	}
-	defer ch.QueueDelete(q.Name, false, false, false)
+	defer ch.QueueDelete(repliesQueue.Name, false, false, false)
 	err = ch.QueueBind(
-		q.Name,                     // queue name
+		repliesQueue.Name,          // queue name
 		client.GetReplyToAddress(), // routing key
 		cookieExchangeName,
 		false, // no-wait
@@ -140,7 +140,7 @@ func (client *Client) handleOutgoingCookieRequestsLoop(ctx context.Context) erro
 	if err != nil {
 		return err
 	}
-	msgs, err := ch.Consume(q.Name, "",
+	replies, err := ch.Consume(repliesQueue.Name, "",
 		true,  // auto-ack
 		true,  // exclusive
 		false, // no-local
@@ -151,6 +151,10 @@ func (client *Client) handleOutgoingCookieRequestsLoop(ctx context.Context) erro
 		return err
 	}
 	go printOurRejectedRequestsLoop(ch, ctx)
+	return client.sendCookieRequestsLoop(ch, ctx, replies)
+}
+
+func (client *Client) sendCookieRequestsLoop(ch *amqp.Channel, ctx context.Context, replies <-chan amqp.Delivery) error {
 	for {
 		username := ""
 		select {
@@ -158,18 +162,18 @@ func (client *Client) handleOutgoingCookieRequestsLoop(ctx context.Context) erro
 			return ctx.Err()
 		case username = <-client.askForCookie:
 		}
+
 		id, err := client.requestCookie(ch, username, ctx)
 		if err != nil {
 			return err
 		}
-		cookie, err := client.expectResponse(msgs, id, ctx)
+		cookie, err := client.expectResponse(replies, id, ctx)
 		if err != nil {
 			return err
 		}
 		log.Printf("%s's cookie is %s\n", username, cookie)
 	}
 }
-
 func printOurRejectedRequestsLoop(ch *amqp.Channel, ctx context.Context) {
 	returnedMsgs := ch.NotifyReturn(make(chan amqp.Return, 1))
 	for {
