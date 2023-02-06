@@ -1,4 +1,8 @@
 package main
+
+const msgsExchangeName = "go_chatserver_msgs"
+const cookieExchangeName = "go_chatserver_cookies"
+
 type BindingKey string
 
 func BindingKeyForRoom(room string) BindingKey {

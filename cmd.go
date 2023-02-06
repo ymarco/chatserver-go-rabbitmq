@@ -21,13 +21,15 @@ func (cmd Cmd) Serialize() string {
 }
 
 const (
-	CmdLogout    Cmd = "quit"
-	CmdJoinRoom  Cmd = "join_room"
-	CmdLeaveRoom Cmd = "leave_room"
-	CmdSend      Cmd = "send"
-	CmdSendRoom  Cmd = "send_room"
-	CmdHelp      Cmd = "help"
-	CmdWhisper   Cmd = "whisper"
+	CmdLogout        Cmd = "quit"
+	CmdDeleteUser    Cmd = "delete_user"
+	CmdJoinRoom      Cmd = "join_room"
+	CmdLeaveRoom     Cmd = "leave_room"
+	CmdSend          Cmd = "send"
+	CmdSendRoom      Cmd = "send_room"
+	CmdHelp          Cmd = "help"
+	CmdWhisper       Cmd = "whisper"
+	CmdRequestCookie Cmd = "request_cookie"
 )
 
 var ErrUnknownCmd = errors.New("unknown cmd")
@@ -39,10 +41,13 @@ func formatDocStringForCmd(cmd Cmd, args, docs string) string {
 
 var helpString = strings.Join([]string{
 	"Commands:",
-	formatDocStringForCmd(CmdLogout, "", "Exit (same as pressing Ctrl-C)"),
+	formatDocStringForCmd(CmdHelp, "", "Print this help"),
+	formatDocStringForCmd(CmdLogout, "", "Exit, saving your user (same as pressing Ctrl-C)"),
+	formatDocStringForCmd(CmdDeleteUser, "", "Exit, deleting your user"),
 	formatDocStringForCmd(CmdJoinRoom, "ROOM", "Join room to receive msgs from it"),
 	formatDocStringForCmd(CmdLeaveRoom, "ROOM", "Leave room to stop receiving"),
 	formatDocStringForCmd(CmdSendRoom, "ROOM", "Send msg to room (don't have to join it first)"),
 	formatDocStringForCmd(CmdSend, "", "Send msg to the global room"),
 	formatDocStringForCmd(CmdWhisper, "USERNAME", "Send msg to a specific user"),
+	formatDocStringForCmd(CmdRequestCookie, "USERNAME", "Request USERNAME's cookie from them"),
 }, "\n")
