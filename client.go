@@ -195,7 +195,7 @@ func (client *Client) executeUserInputLoop(ctx context.Context) error {
 	}
 	defer ClosePrintErr(ch)
 
-	go client.printReturnedChatMsgsLoop(ch, ctx)
+	returnedMsgs := ch.NotifyReturn(make(chan amqp.Return))
 	client.runAsyncAndRouteErrorToChannel(client.handleOutgoingCookieRequestsLoop, ctx)
 	for {
 		select {
@@ -219,6 +219,14 @@ func (client *Client) executeUserInputLoop(ctx context.Context) error {
 					return err
 				}
 			}
+		case msg, ok := <-returnedMsgs:
+			if !ok {
+				return ErrChannelClosed
+			}
+			if msg.Exchange != msgsExchangeName {
+				panic("the only messages send on this channel should be chat messages")
+			}
+			log.Printf("Couldn't send msg on %s: %s\n", msg.RoutingKey, msg.Body)
 		}
 	}
 }
@@ -387,23 +395,4 @@ func (client *Client) printChatMsgsLoop(ctx context.Context) error {
 			return ctx.Err()
 		}
 	}
-}
-
-func (client *Client) printReturnedChatMsgsLoop(ch *amqp.Channel, ctx context.Context) {
-	returnedMsgs := ch.NotifyReturn(make(chan amqp.Return))
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case msg, ok := <-returnedMsgs:
-			if !ok {
-				return
-			}
-			if msg.Exchange != msgsExchangeName {
-				panic("the only messages send on this channel should be chat messages")
-			}
-			log.Printf("Couldn't send msg on %s: %s\n", msg.RoutingKey, msg.Body)
-		}
-	}
-
 }

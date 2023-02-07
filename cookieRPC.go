@@ -64,10 +64,10 @@ func (client *Client) ReplyToIncomingCookieRequestsLoop(ctx context.Context) err
 	if err != nil {
 		return err
 	}
-	go printOurRejectedRepliesLoop(ch, ctx)
 	return client.replyToCookieRequestsLoop(ch, msgs, ctx)
 }
 func (client *Client) replyToCookieRequestsLoop(ch *amqp.Channel, msgs <-chan amqp.Delivery, ctx context.Context) error {
+	returnedMsgs := ch.NotifyReturn(make(chan amqp.Return, 1))
 	for {
 		select {
 		case <-ctx.Done():
@@ -80,19 +80,9 @@ func (client *Client) replyToCookieRequestsLoop(ch *amqp.Channel, msgs <-chan am
 			if err != nil {
 				return err
 			}
-		}
-	}
-}
-
-func printOurRejectedRepliesLoop(ch *amqp.Channel, ctx context.Context) {
-	returnedMsgs := ch.NotifyReturn(make(chan amqp.Return, 1))
-	for {
-		select {
-		case <-ctx.Done():
-			return
 		case msg, ok := <-returnedMsgs:
 			if !ok {
-				return
+				return ErrChannelClosed
 			}
 			log.Printf("Couldn't reply with our cookie to %s\n", msg.ReplyTo)
 		}
