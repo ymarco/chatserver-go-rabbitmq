@@ -200,7 +200,7 @@ func (client *Client) executeUserInputLoop(ctx context.Context) error {
 	for {
 		select {
 		case <-ctx.Done():
-			return ctx.Err()
+			return nil
 		case input := <-stdinChan:
 			if input.Err != nil {
 				if input.Err == io.EOF {
@@ -392,7 +392,7 @@ func (client *Client) printChatMsgsLoop(ctx context.Context) error {
 			}
 			log.Printf("%s (on %s): %s", sender, msg.RoutingKey, msg.Body)
 		case <-ctx.Done():
-			return ctx.Err()
+			return nil
 		}
 	}
 }

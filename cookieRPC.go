@@ -71,7 +71,7 @@ func (client *Client) replyToCookieRequestsLoop(ch *amqp.Channel, msgs <-chan am
 	for {
 		select {
 		case <-ctx.Done():
-			return ctx.Err()
+			return nil
 		case delivery, ok := <-msgs:
 			if !ok {
 				return ErrChannelClosed
@@ -159,7 +159,7 @@ func (client *Client) sendCookieRequestsLoop(ch *amqp.Channel, ctx context.Conte
 		targetUsername := ""
 		select {
 		case <-ctx.Done():
-			return ctx.Err()
+			return nil
 		case targetUsername = <-client.requestACookieFromUsername:
 		}
 
