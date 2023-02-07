@@ -65,8 +65,12 @@ func NewClient(conn *amqp.Connection, name, cookie string) (*Client, error) {
 		return nil, err
 	}
 
+	// we want a large enough buffer so after one error was sent and we stop
+	// pulling from errs, other routines that push to errs won't hang
+	errs := make(chan error, 64)
+
 	return &Client{name, cookie, make(chan string, 1),
-		conn, q, make(chan error, 1), make(chan struct{}, 1)}, nil
+		conn, q, errs, make(chan struct{}, 1)}, nil
 }
 
 func (client *Client) ListenToChatMsgsFrom(ch *amqp.Channel, key BindingKey) error {
@@ -185,7 +189,6 @@ func RunClientOnConnection(name, cookie string, conn *amqp.Connection, connClose
 const DispatchUserInputTimeout = 200 * time.Millisecond
 
 func (client *Client) executeUserInputLoop(ctx context.Context) error {
-
 	ch, err := client.conn.Channel()
 	if err != nil {
 		return err
