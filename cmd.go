@@ -12,7 +12,7 @@ const CmdPrefix = "/"
 func IsCmd(s string) bool {
 	return strings.HasPrefix(s, CmdPrefix)
 }
-func UnserializeStrToCmd(s string) (cmd Cmd, args []string) {
+func DeserializeStrToCmd(s string) (cmd Cmd, args []string) {
 	parts := strings.Fields(s)
 	return Cmd(parts[0][1:]), parts[1:]
 }

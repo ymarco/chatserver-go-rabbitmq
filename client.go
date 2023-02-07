@@ -65,7 +65,7 @@ func NewClient(conn *amqp.Connection, name, cookie string) (*Client, error) {
 		return nil, err
 	}
 
-	// we want a large enough buffer so after one error was sent and we stop
+	// we want a large enough buffer so after one error was sent, and we stop
 	// pulling from errs, other routines that push to errs won't hang
 	errs := make(chan error, 64)
 
@@ -228,7 +228,7 @@ func (client *Client) dispatchUserInput(input string, ch *amqp.Channel, ctx cont
 	defer cancel()
 
 	if IsCmd(input) {
-		cmd, args := UnserializeStrToCmd(input)
+		cmd, args := DeserializeStrToCmd(input)
 		return client.dispatchCmd(ch, cmd, args, ctx)
 	} else {
 		return client.sendChatMsg(ch, BindingKeyForGlobalRoom, input, ctx)
@@ -247,8 +247,7 @@ func (client *Client) dispatchCmd(ch *amqp.Channel, cmd Cmd, args []string, ctx 
 	switch cmd {
 	case CmdDeleteUser:
 		client.quit <- struct{}{}
-		client.delete(ch)
-		return nil
+		return client.delete(ch)
 	case CmdLogout:
 		client.quit <- struct{}{}
 		return nil
@@ -279,12 +278,13 @@ func (client *Client) dispatchRequestCookieCmd(args []string) error {
 	return nil // let handleOutgoingCookieRequestsLoop handle it
 }
 
-func (client *Client) delete(ch *amqp.Channel) {
-	ch.QueueDelete(client.name,
+func (client *Client) delete(ch *amqp.Channel) error {
+	_, err := ch.QueueDelete(client.name,
 		false, // ifUnused
 		false, // ifEmpty
 		false, // noWait
 	)
+	return err
 }
 func (client *Client) dispatchRoomJoinOrLeaveCmd(ch *amqp.Channel, cmd Cmd, args []string) error {
 	if len(args) != 1 {
@@ -332,7 +332,10 @@ func (client *Client) dispatchSendCmd(ch *amqp.Channel, cmd Cmd, args []string, 
 			return ErrInvalidTopicComponent
 		}
 		key = BindingKeyForRoom(room)
-		client.ListenToChatMsgsFrom(ch, key)
+		err := client.ListenToChatMsgsFrom(ch, key)
+		if err != nil {
+			return err
+		}
 
 		body = strings.Join(args[1:], " ")
 	}

@@ -38,7 +38,12 @@ func (client *Client) ReplyToIncomingCookieRequestsLoop(ctx context.Context) err
 	if err != nil {
 		return err
 	}
-	defer ch.QueueDelete(q.Name, false, false, false)
+	defer func() {
+		_, err := ch.QueueDelete(q.Name, false, false, false)
+		if err != nil {
+			log.Println(err)
+		}
+	}()
 	err = ch.QueueBind(
 		q.Name,      // queue name
 		client.name, // routing key
@@ -211,7 +216,6 @@ func (client *Client) requestCookie(ch *amqp.Channel, user string, ctx context.C
 }
 
 var ErrChannelClosed = errors.New("channel closed")
-var ErrUnexpectedCorrelationId = errors.New("channel closed")
 var ErrMsgWasReturned = errors.New("message didn't find a destination and was returned")
 
 func (client *Client) expectReply(msgs <-chan amqp.Delivery, returnedMsgs <-chan amqp.Return, id string, ctx context.Context) (cookie string, err error) {
