@@ -182,7 +182,6 @@ func RunClientOnConnection(name, cookie string, conn *amqp.Connection, connClose
 const DispatchUserInputTimeout = 200 * time.Millisecond
 
 func (client *Client) executeUserInputLoop(ctx context.Context) error {
-	client.runAsyncAndRouteErrorToChannel(client.handleOutgoingCookieRequestsLoop, ctx)
 
 	ch, err := client.conn.Channel()
 	if err != nil {
@@ -192,6 +191,7 @@ func (client *Client) executeUserInputLoop(ctx context.Context) error {
 
 	go client.printReturnedChatMsgsLoop(ch, ctx)
 	userInput := ReadAsyncIntoChan(bufio.NewScanner(os.Stdin))
+	client.runAsyncAndRouteErrorToChannel(client.handleOutgoingCookieRequestsLoop, ctx)
 	for {
 		select {
 		case <-ctx.Done():
