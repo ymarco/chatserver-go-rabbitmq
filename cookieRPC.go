@@ -64,9 +64,9 @@ func (client *Client) ReplyToIncomingCookieRequestsLoop(ctx context.Context) err
 	if err != nil {
 		return err
 	}
-	return client.replyToCookieRequestsLoop(ch, msgs, ctx)
+	return client.replyToCookieRequestsFromChanLoop(ch, msgs, ctx)
 }
-func (client *Client) replyToCookieRequestsLoop(ch *amqp.Channel, msgs <-chan amqp.Delivery, ctx context.Context) error {
+func (client *Client) replyToCookieRequestsFromChanLoop(ch *amqp.Channel, msgs <-chan amqp.Delivery, ctx context.Context) error {
 	returnedMsgs := ch.NotifyReturn(make(chan amqp.Return, 1))
 	for {
 		select {

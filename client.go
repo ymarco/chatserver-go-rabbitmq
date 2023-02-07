@@ -169,7 +169,7 @@ func RunClientOnConnection(name, cookie string, conn *amqp.Connection, connClose
 	defer cancel()
 
 	client.runAsyncAndRouteErrorToChannel(client.executeUserInputLoop, ctx)
-	client.runAsyncAndRouteErrorToChannel(client.printChatMsgsLoop, ctx)
+	client.runAsyncAndRouteErrorToChannel(client.printIncomingChatMsgsLoop, ctx)
 	client.runAsyncAndRouteErrorToChannel(client.ReplyToIncomingCookieRequestsLoop, ctx)
 
 	select {
@@ -352,7 +352,7 @@ func (client *Client) dispatchSendCmd(ch *amqp.Channel, cmd Cmd, args []string, 
 
 var ErrNoSender = errors.New("msg header doesn't contain a sender")
 
-func (client *Client) printChatMsgsLoop(ctx context.Context) error {
+func (client *Client) printIncomingChatMsgsLoop(ctx context.Context) error {
 	ch, err := client.conn.Channel()
 	if err != nil {
 		return err
