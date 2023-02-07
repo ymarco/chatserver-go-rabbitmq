@@ -101,7 +101,10 @@ func (client *Client) sendChatMsg(ch *amqp.Channel, key BindingKey, body string,
 const channelReconnectDelay = 1 * time.Second
 const connectionReconnectDelay = 5 * time.Second
 
+var stdinChan <-chan ReadInput
+
 func RunClient(name, cookie string) {
+	stdinChan = ReadAsyncIntoChan(bufio.NewScanner(os.Stdin))
 	for RunClientUntilDisconnected(name, cookie) {
 		fmt.Printf("Retrying in %s ...\n", connectionReconnectDelay)
 		time.Sleep(connectionReconnectDelay)
@@ -190,13 +193,12 @@ func (client *Client) executeUserInputLoop(ctx context.Context) error {
 	defer ClosePrintErr(ch)
 
 	go client.printReturnedChatMsgsLoop(ch, ctx)
-	userInput := ReadAsyncIntoChan(bufio.NewScanner(os.Stdin))
 	client.runAsyncAndRouteErrorToChannel(client.handleOutgoingCookieRequestsLoop, ctx)
 	for {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
-		case input := <-userInput:
+		case input := <-stdinChan:
 			if input.Err != nil {
 				if input.Err == io.EOF {
 					client.quit <- struct{}{}
