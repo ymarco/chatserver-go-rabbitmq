@@ -15,13 +15,15 @@ import (
 )
 
 type Client struct {
-	name                       string
-	cookie                     string
-	requestACookieFromUsername chan string
-	conn                       *amqp.Connection
-	receiveChatMsgsQueue       amqp.Queue
-	errs                       chan error
-	quit                       chan struct{}
+	name             string
+	cookie           string
+	conn             *amqp.Connection
+	receiveChatMsgsQ amqp.Queue
+
+	repliesToOurCookieRequestQ amqp.Queue
+
+	errs chan error
+	quit chan struct{}
 }
 
 func NewClient(conn *amqp.Connection, name, cookie string) (*Client, error) {
@@ -43,7 +45,7 @@ func NewClient(conn *amqp.Connection, name, cookie string) (*Client, error) {
 		return nil, err
 	}
 
-	q, err := ch.QueueDeclare(
+	receiveChatMsgs, err := ch.QueueDeclare(
 		name,  // name
 		true,  // durable
 		false, // delete when unused
@@ -55,12 +57,22 @@ func NewClient(conn *amqp.Connection, name, cookie string) (*Client, error) {
 		return nil, err
 	}
 
+	repliesToOurCookieRequestQ, err := ch.QueueDeclare(
+		(&Client{name: name}).ReplyToAddress(), false, false, true, false, nil)
+
+	if err != nil {
+		return nil, err
+	}
+	if err != nil {
+		return nil, err
+	}
+
 	// we want a large enough buffer so after one error was sent, and we stop
 	// pulling from errs, other routines that push to errs won't hang
 	errs := make(chan error, 64)
 
-	client := &Client{name, cookie, make(chan string, 1),
-		conn, q, errs, make(chan struct{}, 1)}
+	client := &Client{name, cookie, conn,
+		receiveChatMsgs, repliesToOurCookieRequestQ, errs, make(chan struct{}, 1)}
 	err = client.ListenToChatMsgsFrom(ch, BindingKeyForGlobalRoom)
 	if err != nil {
 		return nil, err
@@ -75,8 +87,8 @@ func NewClient(conn *amqp.Connection, name, cookie string) (*Client, error) {
 func (client *Client) ListenToChatMsgsFrom(ch *amqp.Channel, key BindingKey) error {
 	log.Printf("Bound to %s\n", key)
 	return ch.QueueBind(
-		client.receiveChatMsgsQueue.Name, // queue name
-		string(key),                      // routing key
+		client.receiveChatMsgsQ.Name, // queue name
+		string(key),                   // routing key
 		msgsExchangeName,
 		false,
 		nil)
@@ -84,7 +96,7 @@ func (client *Client) ListenToChatMsgsFrom(ch *amqp.Channel, key BindingKey) err
 
 func (client *Client) DontListenToChatMsgsFrom(ch *amqp.Channel, key BindingKey) error {
 	log.Printf("Unbound from %s\n", key)
-	return ch.QueueUnbind(client.receiveChatMsgsQueue.Name, string(key), msgsExchangeName, nil)
+	return ch.QueueUnbind(client.receiveChatMsgsQ.Name, string(key), msgsExchangeName, nil)
 }
 
 const SenderHeaderName = "sender"
@@ -196,9 +208,13 @@ func (client *Client) executeIncomingUserInput(ctx context.Context) error {
 	}
 	defer ClosePrintErr(ch)
 
+	RPCReplies, err := ch.Consume(client.repliesToOurCookieRequestQ.Name, client.repliesToOurCookieRequestQ.Name, true, true, false, false, nil)
+	if err != nil {
+		return err
+	}
+
 	returnedMsgs := ch.NotifyReturn(make(chan amqp.Return))
 
-	client.runAsyncAndRouteError(client.handleOutgoingCookieRequests, ctx)
 	for {
 		select {
 		case <-ctx.Done():
@@ -212,7 +228,7 @@ func (client *Client) executeIncomingUserInput(ctx context.Context) error {
 				return input.Err
 			}
 
-			err := client.dispatchUserInput(input.Val, ch, ctx)
+			err := client.dispatchUserInput(input.Val, ch, RPCReplies, returnedMsgs, ctx)
 			if err != nil {
 				switch err {
 				case ErrUnknownCmd:
@@ -233,13 +249,13 @@ func (client *Client) executeIncomingUserInput(ctx context.Context) error {
 	}
 }
 
-func (client *Client) dispatchUserInput(input string, ch *amqp.Channel, ctx context.Context) error {
+func (client *Client) dispatchUserInput(input string, ch *amqp.Channel, RPCReplies <-chan amqp.Delivery, returned <-chan amqp.Return, ctx context.Context) error {
 	ctx, cancel := context.WithTimeout(ctx, DispatchUserInputTimeout)
 	defer cancel()
 
 	if IsCmd(input) {
 		cmd, args := DeserializeStrToCmd(input)
-		return client.dispatchCmd(ch, cmd, args, ctx)
+		return client.dispatchCmd(ch, cmd, args, RPCReplies, returned, ctx)
 	} else {
 		return client.sendChatMsg(ch, BindingKeyForGlobalRoom, input, ctx)
 	}
@@ -253,7 +269,7 @@ func isValidBindingKeyComponent(str string) bool {
 
 var ErrInvalidTopicComponent = errors.New("topic components can't contain ., #, *")
 
-func (client *Client) dispatchCmd(ch *amqp.Channel, cmd Cmd, args []string, ctx context.Context) error {
+func (client *Client) dispatchCmd(ch *amqp.Channel, cmd Cmd, args []string, RPCReplies <-chan amqp.Delivery, returned <-chan amqp.Return, ctx context.Context) error {
 	switch cmd {
 	case CmdDeleteUser:
 		client.quit <- struct{}{}
@@ -269,13 +285,13 @@ func (client *Client) dispatchCmd(ch *amqp.Channel, cmd Cmd, args []string, ctx 
 		fmt.Println(helpString)
 		return nil
 	case CmdRequestCookie:
-		return client.dispatchRequestCookieCmd(args)
+		return client.dispatchRequestCookieCmd(ch, args, RPCReplies, returned, ctx)
 	default:
 		return ErrUnknownCmd
 	}
 }
 
-func (client *Client) dispatchRequestCookieCmd(args []string) error {
+func (client *Client) dispatchRequestCookieCmd(ch *amqp.Channel, args []string, RPCReplies <-chan amqp.Delivery, returned <-chan amqp.Return, ctx context.Context) error {
 	if len(args) != 1 {
 		fmt.Println("Error: request_cookie needs 1 arg: USERNAME")
 		return nil
@@ -284,8 +300,7 @@ func (client *Client) dispatchRequestCookieCmd(args []string) error {
 	if !isValidBindingKeyComponent(username) {
 		return ErrInvalidTopicComponent
 	}
-	client.requestACookieFromUsername <- username
-	return nil // let handleOutgoingCookieRequests handle it
+	return client.requestCookie(ch, username, RPCReplies, returned, ctx)
 }
 
 func (client *Client) delete(ch *amqp.Channel) error {
@@ -362,14 +377,15 @@ func (client *Client) printIncomingChatMsgs(ctx context.Context) error {
 	defer ClosePrintErr(ch)
 
 	msgs, err := ch.Consume(
-		client.receiveChatMsgsQueue.Name, // queue
-		client.name,                      // consumer
-		true,                             // auto ack
-		true,                             // exclusive
-		false,                            // this flag is unsupported
-		false,                            // no wait
-		nil,                              // args
+		client.receiveChatMsgsQ.Name, // queue
+		client.name,                  // consumer
+		true,                         // auto ack
+		true,                         // exclusive
+		false,                        // this flag is unsupported
+		false,                        // no wait
+		nil,                          // args
 	)
+
 	if err != nil {
 		return err
 	}

@@ -87,62 +87,21 @@ func (client *Client) replyToCookieRPCRequest(ch *amqp.Channel, delivery amqp.De
 	)
 }
 
-func (client *Client) handleOutgoingCookieRequests(ctx context.Context) error {
-	ch, err := client.conn.Channel()
+func (client *Client) requestCookie(ch *amqp.Channel, targetUsername string, RPCReplies <-chan amqp.Delivery, returned <-chan amqp.Return, ctx context.Context) error {
+	id, err := client.sendCookieRequest(ch, targetUsername, ctx)
 	if err != nil {
 		return err
 	}
-	defer ClosePrintErr(ch)
-
-	repliesQueue, err := ch.QueueDeclare(
-		client.ReplyToAddress(), // name
-		false,                   // durable
-		false,                   // auto-delete
-		true,                    // exclusive
-		false,                   // no-wait
-		nil,                     // args
-	)
+	cookie, err := client.expectReply(id, RPCReplies, returned, ctx)
 	if err != nil {
-		return err
-	}
-
-	replies, err := ch.Consume(repliesQueue.Name, "",
-		true,  // auto-ack
-		true,  // exclusive
-		false, // no-local
-		false, // no-wait
-		nil,   // args
-	)
-	if err != nil {
-		return err
-	}
-	return client.sendCookieRequests(ch, ctx, replies)
-}
-
-func (client *Client) sendCookieRequests(ch *amqp.Channel, ctx context.Context, replies <-chan amqp.Delivery) error {
-	returnedMsgs := ch.NotifyReturn(make(chan amqp.Return, 1))
-	for {
-		targetUsername := ""
-		select {
-		case <-ctx.Done():
+		if err == ErrMsgWasReturned {
+			log.Println(err)
 			return nil
-		case targetUsername = <-client.requestACookieFromUsername:
 		}
-
-		id, err := client.requestCookie(ch, targetUsername, ctx)
-		if err != nil {
-			return err
-		}
-		cookie, err := client.expectReply(replies, returnedMsgs, id, ctx)
-		if err != nil {
-			if err == ErrMsgWasReturned {
-				log.Println(err)
-				continue
-			}
-			return err
-		}
-		log.Printf("%s's cookie is %s\n", targetUsername, cookie)
+		return err
 	}
+	log.Printf("%s's cookie is %s\n", targetUsername, cookie)
+	return nil
 }
 
 var globalIdInt int64 = 0
@@ -151,7 +110,7 @@ func getGlobalId() string {
 	return strconv.FormatInt(globalIdInt, 10)
 }
 
-func (client *Client) requestCookie(ch *amqp.Channel, user string, ctx context.Context) (correlationID string, err error) {
+func (client *Client) sendCookieRequest(ch *amqp.Channel, user string, ctx context.Context) (correlationID string, err error) {
 	correlationID = getGlobalId()
 	err = ch.PublishWithContext(ctx,
 		amqp.DefaultExchange,
@@ -174,7 +133,7 @@ func (client *Client) requestCookie(ch *amqp.Channel, user string, ctx context.C
 var ErrChannelClosed = errors.New("channel closed")
 var ErrMsgWasReturned = errors.New("message didn't find a destination and was returned")
 
-func (client *Client) expectReply(msgs <-chan amqp.Delivery, returnedMsgs <-chan amqp.Return, id string, ctx context.Context) (cookie string, err error) {
+func (client *Client) expectReply(id string, replies <-chan amqp.Delivery, returnedMsgs <-chan amqp.Return, ctx context.Context) (cookie string, err error) {
 	for {
 		select {
 		case <-ctx.Done():
@@ -188,7 +147,7 @@ func (client *Client) expectReply(msgs <-chan amqp.Delivery, returnedMsgs <-chan
 			} else {
 				continue
 			}
-		case delivery, ok := <-msgs:
+		case delivery, ok := <-replies:
 			if !ok {
 				return "", ErrChannelClosed
 			}
