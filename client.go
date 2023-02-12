@@ -43,16 +43,6 @@ func NewClient(conn *amqp.Connection, name, cookie string) (*Client, error) {
 		return nil, err
 	}
 
-	err = ch.ExchangeDeclare(
-		cookieExchangeName,
-		amqp.ExchangeDirect, // type
-		false,               // durable
-		false,               // auto-deleted
-		false,               // internal
-		false,               // no-wait
-		nil,                 // arguments
-	)
-
 	q, err := ch.QueueDeclare(
 		name,  // name
 		true,  // durable

@@ -9,14 +9,11 @@ import (
 	amqp "github.com/rabbitmq/amqp091-go"
 )
 
-func (client *Client) RepliesQueueName() string {
-	return client.name + "_cookieRPCSender"
+func (client *Client) ReplyToAddress() string {
+	return client.name + "_replyToAddress"
 }
 
-func (client *Client) ReplyToAddress() string {
-	return client.name + "_cookieRPCReplyTo"
-}
-func (client *Client) GetListenerRPCQueueName() string {
+func (client *Client) RPCListenerQueueName() string {
 	return client.name + "_cookieRPCListener"
 }
 
@@ -28,27 +25,17 @@ func (client *Client) ReplyToIncomingCookieRequests(ctx context.Context) error {
 	defer ClosePrintErr(ch)
 
 	q, err := ch.QueueDeclare(
-		client.GetListenerRPCQueueName(), // name
-		false,                            // durable
-		false,                            // auto-delete
-		true,                             // exclusive
-		false,                            // no-wait
-		nil,                              // args
+		client.RPCListenerQueueName(), // name
+		false,                         // durable
+		false,                         // auto-delete
+		true,                          // exclusive
+		false,                         // no-wait
+		nil,                           // args
 	)
 	if err != nil {
 		return err
 	}
 
-	err = ch.QueueBind(
-		q.Name,      // queue name
-		client.name, // routing key
-		cookieExchangeName,
-		false, // no-wait
-		nil,   // args
-	)
-	if err != nil {
-		return err
-	}
 	msgs, err := ch.Consume(q.Name, "",
 		true,  // auto-ack
 		true,  // exclusive
@@ -108,28 +95,17 @@ func (client *Client) handleOutgoingCookieRequests(ctx context.Context) error {
 	defer ClosePrintErr(ch)
 
 	repliesQueue, err := ch.QueueDeclare(
-		client.RepliesQueueName(), // name
-		false,                     // durable
-		false,                     // auto-delete
-		true,                      // exclusive
-		false,                     // no-wait
-		nil,                       // args
+		client.ReplyToAddress(), // name
+		false,                   // durable
+		false,                   // auto-delete
+		true,                    // exclusive
+		false,                   // no-wait
+		nil,                     // args
 	)
 	if err != nil {
 		return err
 	}
 
-	err = ch.QueueBind(
-		repliesQueue.Name,       // queue name
-		client.ReplyToAddress(), // routing key
-		cookieExchangeName,
-		false, // no-wait
-		nil,   // args
-	)
-
-	if err != nil {
-		return err
-	}
 	replies, err := ch.Consume(repliesQueue.Name, "",
 		true,  // auto-ack
 		true,  // exclusive
@@ -178,10 +154,10 @@ func getGlobalId() string {
 func (client *Client) requestCookie(ch *amqp.Channel, user string, ctx context.Context) (correlationID string, err error) {
 	correlationID = getGlobalId()
 	err = ch.PublishWithContext(ctx,
-		cookieExchangeName, // exchange
-		user,               // routing key
-		true,               // mandatory
-		false,              // immediate
+		amqp.DefaultExchange,
+		(&Client{name: user}).RPCListenerQueueName(), // routing key
+		true,  // mandatory
+		false, // immediate
 		amqp.Publishing{
 			ContentType:   "text/plain",
 			CorrelationId: correlationID,

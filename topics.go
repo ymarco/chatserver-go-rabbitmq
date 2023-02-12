@@ -1,7 +1,6 @@
 package main
 
 const msgsExchangeName = "go_chatserver_msgs"
-const cookieExchangeName = "go_chatserver_cookies"
 
 type BindingKey string
 
