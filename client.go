@@ -69,8 +69,17 @@ func NewClient(conn *amqp.Connection, name, cookie string) (*Client, error) {
 	// pulling from errs, other routines that push to errs won't hang
 	errs := make(chan error, 64)
 
-	return &Client{name, cookie, make(chan string, 1),
-		conn, q, errs, make(chan struct{}, 1)}, nil
+	client := &Client{name, cookie, make(chan string, 1),
+		conn, q, errs, make(chan struct{}, 1)}
+	err = client.ListenToChatMsgsFrom(ch, BindingKeyForGlobalRoom)
+	if err != nil {
+		return nil, err
+	}
+	err = client.ListenToChatMsgsFrom(ch, BindingKeyForPrivateMsg(client.name))
+	if err != nil {
+		return nil, err
+	}
+	return client, nil
 }
 
 func (client *Client) ListenToChatMsgsFrom(ch *amqp.Channel, key BindingKey) error {
@@ -87,6 +96,7 @@ func (client *Client) DontListenToChatMsgsFrom(ch *amqp.Channel, key BindingKey)
 	log.Printf("Unbound from %s\n", key)
 	return ch.QueueUnbind(client.receiveChatMsgsQueue.Name, string(key), msgsExchangeName, nil)
 }
+
 const SenderHeaderName = "sender"
 
 func (client *Client) sendChatMsg(ch *amqp.Channel, key BindingKey, body string, ctx context.Context) error {
