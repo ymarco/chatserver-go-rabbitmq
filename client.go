@@ -87,6 +87,7 @@ func (client *Client) DontListenToChatMsgsFrom(ch *amqp.Channel, key BindingKey)
 	log.Printf("Unbound from %s\n", key)
 	return ch.QueueUnbind(client.receiveChatMsgsQueue.Name, string(key), msgsExchangeName, nil)
 }
+const SenderHeaderName = "sender"
 
 func (client *Client) sendChatMsg(ch *amqp.Channel, key BindingKey, body string, ctx context.Context) error {
 	log.Printf("Sending on %s\n", key)
@@ -98,7 +99,7 @@ func (client *Client) sendChatMsg(ch *amqp.Channel, key BindingKey, body string,
 		amqp.Publishing{
 			ContentType: "text/plain",
 			Body:        []byte(body),
-			Headers:     map[string]interface{}{"sender": client.name},
+			Headers:     map[string]interface{}{SenderHeaderName: client.name},
 		})
 }
 
@@ -384,7 +385,7 @@ func (client *Client) printIncomingChatMsgs(ctx context.Context) error {
 			if !ok {
 				return ErrChannelClosed
 			}
-			sender, ok := msg.Headers["sender"]
+			sender, ok := msg.Headers[SenderHeaderName]
 			if !ok {
 				return ErrNoSender
 			}
