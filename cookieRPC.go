@@ -38,12 +38,7 @@ func (client *Client) ReplyToIncomingCookieRequestsLoop(ctx context.Context) err
 	if err != nil {
 		return err
 	}
-	defer func() {
-		_, err := ch.QueueDelete(q.Name, false, false, false)
-		if err != nil {
-			log.Println(err)
-		}
-	}()
+
 	err = ch.QueueBind(
 		q.Name,      // queue name
 		client.name, // routing key
@@ -123,12 +118,7 @@ func (client *Client) handleOutgoingCookieRequestsLoop(ctx context.Context) erro
 	if err != nil {
 		return err
 	}
-	defer func() {
-		_, err := ch.QueueDelete(repliesQueue.Name, false, false, false)
-		if err != nil {
-			log.Println("couldn't close replies queue", err)
-		}
-	}()
+
 	err = ch.QueueBind(
 		repliesQueue.Name,       // queue name
 		client.ReplyToAddress(), // routing key
