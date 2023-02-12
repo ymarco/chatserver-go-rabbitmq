@@ -168,9 +168,9 @@ func RunClientOnConnection(name, cookie string, conn *amqp.Connection, connClose
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	client.runAsyncAndRouteError(client.executeUserInputLoop, ctx)
-	client.runAsyncAndRouteError(client.printIncomingChatMsgsLoop, ctx)
-	client.runAsyncAndRouteError(client.ReplyToIncomingCookieRequestsLoop, ctx)
+	client.runAsyncAndRouteError(client.executeIncomingUserInput, ctx)
+	client.runAsyncAndRouteError(client.printIncomingChatMsgs, ctx)
+	client.runAsyncAndRouteError(client.ReplyToIncomingCookieRequests, ctx)
 
 	select {
 	case err := <-connClosed:
@@ -188,7 +188,7 @@ func RunClientOnConnection(name, cookie string, conn *amqp.Connection, connClose
 
 const DispatchUserInputTimeout = 200 * time.Millisecond
 
-func (client *Client) executeUserInputLoop(ctx context.Context) error {
+func (client *Client) executeIncomingUserInput(ctx context.Context) error {
 	ch, err := client.conn.Channel()
 	if err != nil {
 		return err
@@ -197,7 +197,7 @@ func (client *Client) executeUserInputLoop(ctx context.Context) error {
 
 	returnedMsgs := ch.NotifyReturn(make(chan amqp.Return))
 
-	client.runAsyncAndRouteError(client.handleOutgoingCookieRequestsLoop, ctx)
+	client.runAsyncAndRouteError(client.handleOutgoingCookieRequests, ctx)
 	for {
 		select {
 		case <-ctx.Done():
@@ -284,7 +284,7 @@ func (client *Client) dispatchRequestCookieCmd(args []string) error {
 		return ErrInvalidTopicComponent
 	}
 	client.requestACookieFromUsername <- username
-	return nil // let handleOutgoingCookieRequestsLoop handle it
+	return nil // let handleOutgoingCookieRequests handle it
 }
 
 func (client *Client) delete(ch *amqp.Channel) error {
@@ -353,7 +353,7 @@ func (client *Client) dispatchSendCmd(ch *amqp.Channel, cmd Cmd, args []string, 
 
 var ErrNoSender = errors.New("msg header doesn't contain a sender")
 
-func (client *Client) printIncomingChatMsgsLoop(ctx context.Context) error {
+func (client *Client) printIncomingChatMsgs(ctx context.Context) error {
 	ch, err := client.conn.Channel()
 	if err != nil {
 		return err

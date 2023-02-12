@@ -20,7 +20,7 @@ func (client *Client) GetListenerRPCQueueName() string {
 	return client.name + "_cookieRPCListener"
 }
 
-func (client *Client) ReplyToIncomingCookieRequestsLoop(ctx context.Context) error {
+func (client *Client) ReplyToIncomingCookieRequests(ctx context.Context) error {
 	ch, err := client.conn.Channel()
 	if err != nil {
 		return err
@@ -59,9 +59,9 @@ func (client *Client) ReplyToIncomingCookieRequestsLoop(ctx context.Context) err
 	if err != nil {
 		return err
 	}
-	return client.replyToCookieRequestsFromChanLoop(ch, msgs, ctx)
+	return client.replyToCookieRequestsFromChan(ch, msgs, ctx)
 }
-func (client *Client) replyToCookieRequestsFromChanLoop(ch *amqp.Channel, msgs <-chan amqp.Delivery, ctx context.Context) error {
+func (client *Client) replyToCookieRequestsFromChan(ch *amqp.Channel, msgs <-chan amqp.Delivery, ctx context.Context) error {
 	returnedMsgs := ch.NotifyReturn(make(chan amqp.Return, 1))
 	for {
 		select {
@@ -100,7 +100,7 @@ func (client *Client) replyToCookieRPCRequest(ch *amqp.Channel, delivery amqp.De
 	)
 }
 
-func (client *Client) handleOutgoingCookieRequestsLoop(ctx context.Context) error {
+func (client *Client) handleOutgoingCookieRequests(ctx context.Context) error {
 	ch, err := client.conn.Channel()
 	if err != nil {
 		return err
@@ -140,10 +140,10 @@ func (client *Client) handleOutgoingCookieRequestsLoop(ctx context.Context) erro
 	if err != nil {
 		return err
 	}
-	return client.sendCookieRequestsLoop(ch, ctx, replies)
+	return client.sendCookieRequests(ch, ctx, replies)
 }
 
-func (client *Client) sendCookieRequestsLoop(ch *amqp.Channel, ctx context.Context, replies <-chan amqp.Delivery) error {
+func (client *Client) sendCookieRequests(ch *amqp.Channel, ctx context.Context, replies <-chan amqp.Delivery) error {
 	returnedMsgs := ch.NotifyReturn(make(chan amqp.Return, 1))
 	for {
 		targetUsername := ""
