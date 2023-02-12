@@ -87,12 +87,12 @@ func (client *Client) replyToCookieRPCRequest(ch *amqp.Channel, delivery amqp.De
 	)
 }
 
-func (client *Client) requestCookie(ch *amqp.Channel, targetUsername string, RPCReplies <-chan amqp.Delivery, returned <-chan amqp.Return, ctx context.Context) error {
+func (client *Client) requestCookie(ch *amqp.Channel, targetUsername string, rpcChannels RpcChannels, ctx context.Context) error {
 	id, err := client.sendCookieRequest(ch, targetUsername, ctx)
 	if err != nil {
 		return err
 	}
-	cookie, err := client.expectReply(id, RPCReplies, returned, ctx)
+	cookie, err := client.expectReply(id, rpcChannels, ctx)
 	if err != nil {
 		if err == ErrMsgWasReturned {
 			log.Println(err)
@@ -133,12 +133,12 @@ func (client *Client) sendCookieRequest(ch *amqp.Channel, user string, ctx conte
 var ErrChannelClosed = errors.New("channel closed")
 var ErrMsgWasReturned = errors.New("message didn't find a destination and was returned")
 
-func (client *Client) expectReply(id string, replies <-chan amqp.Delivery, returnedMsgs <-chan amqp.Return, ctx context.Context) (cookie string, err error) {
+func (client *Client) expectReply(id string, rpcChannels RpcChannels, ctx context.Context) (cookie string, err error) {
 	for {
 		select {
 		case <-ctx.Done():
 			return "", ctx.Err()
-		case returnedMsg, ok := <-returnedMsgs:
+		case returnedMsg, ok := <-rpcChannels.rejectedRequests:
 			if !ok {
 				return "", ErrChannelClosed
 			}
@@ -147,7 +147,7 @@ func (client *Client) expectReply(id string, replies <-chan amqp.Delivery, retur
 			} else {
 				continue
 			}
-		case delivery, ok := <-replies:
+		case delivery, ok := <-rpcChannels.replies:
 			if !ok {
 				return "", ErrChannelClosed
 			}

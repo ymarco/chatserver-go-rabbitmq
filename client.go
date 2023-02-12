@@ -88,7 +88,7 @@ func (client *Client) ListenToChatMsgsFrom(ch *amqp.Channel, key BindingKey) err
 	log.Printf("Bound to %s\n", key)
 	return ch.QueueBind(
 		client.receiveChatMsgsQ.Name, // queue name
-		string(key),                   // routing key
+		string(key),                  // routing key
 		msgsExchangeName,
 		false,
 		nil)
@@ -201,6 +201,11 @@ func RunClientOnConnection(name, cookie string, conn *amqp.Connection, connClose
 
 const DispatchUserInputTimeout = 200 * time.Millisecond
 
+type RpcChannels struct {
+	replies          <-chan amqp.Delivery
+	rejectedRequests <-chan amqp.Return
+}
+
 func (client *Client) executeIncomingUserInput(ctx context.Context) error {
 	ch, err := client.conn.Channel()
 	if err != nil {
@@ -228,7 +233,7 @@ func (client *Client) executeIncomingUserInput(ctx context.Context) error {
 				return input.Err
 			}
 
-			err := client.dispatchUserInput(input.Val, ch, RPCReplies, returnedMsgs, ctx)
+			err := client.dispatchUserInput(input.Val, ch, RpcChannels{RPCReplies, returnedMsgs}, ctx)
 			if err != nil {
 				switch err {
 				case ErrUnknownCmd:
@@ -249,13 +254,13 @@ func (client *Client) executeIncomingUserInput(ctx context.Context) error {
 	}
 }
 
-func (client *Client) dispatchUserInput(input string, ch *amqp.Channel, RPCReplies <-chan amqp.Delivery, returned <-chan amqp.Return, ctx context.Context) error {
+func (client *Client) dispatchUserInput(input string, ch *amqp.Channel, rpcChannels RpcChannels, ctx context.Context) error {
 	ctx, cancel := context.WithTimeout(ctx, DispatchUserInputTimeout)
 	defer cancel()
 
 	if IsCmd(input) {
 		cmd, args := DeserializeStrToCmd(input)
-		return client.dispatchCmd(ch, cmd, args, RPCReplies, returned, ctx)
+		return client.dispatchCmd(ch, cmd, args, rpcChannels, ctx)
 	} else {
 		return client.sendChatMsg(ch, BindingKeyForGlobalRoom, input, ctx)
 	}
@@ -269,7 +274,7 @@ func isValidBindingKeyComponent(str string) bool {
 
 var ErrInvalidTopicComponent = errors.New("topic components can't contain ., #, *")
 
-func (client *Client) dispatchCmd(ch *amqp.Channel, cmd Cmd, args []string, RPCReplies <-chan amqp.Delivery, returned <-chan amqp.Return, ctx context.Context) error {
+func (client *Client) dispatchCmd(ch *amqp.Channel, cmd Cmd, args []string, rpcChannels RpcChannels, ctx context.Context) error {
 	switch cmd {
 	case CmdDeleteUser:
 		client.quit <- struct{}{}
@@ -285,13 +290,13 @@ func (client *Client) dispatchCmd(ch *amqp.Channel, cmd Cmd, args []string, RPCR
 		fmt.Println(helpString)
 		return nil
 	case CmdRequestCookie:
-		return client.dispatchRequestCookieCmd(ch, args, RPCReplies, returned, ctx)
+		return client.dispatchRequestCookieCmd(ch, args, rpcChannels, ctx)
 	default:
 		return ErrUnknownCmd
 	}
 }
 
-func (client *Client) dispatchRequestCookieCmd(ch *amqp.Channel, args []string, RPCReplies <-chan amqp.Delivery, returned <-chan amqp.Return, ctx context.Context) error {
+func (client *Client) dispatchRequestCookieCmd(ch *amqp.Channel, args []string, rpcChannels RpcChannels, ctx context.Context) error {
 	if len(args) != 1 {
 		fmt.Println("Error: request_cookie needs 1 arg: USERNAME")
 		return nil
@@ -300,7 +305,7 @@ func (client *Client) dispatchRequestCookieCmd(ch *amqp.Channel, args []string, 
 	if !isValidBindingKeyComponent(username) {
 		return ErrInvalidTopicComponent
 	}
-	return client.requestCookie(ch, username, RPCReplies, returned, ctx)
+	return client.requestCookie(ch, username, rpcChannels, ctx)
 }
 
 func (client *Client) delete(ch *amqp.Channel) error {
