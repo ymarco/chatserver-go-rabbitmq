@@ -45,12 +45,12 @@ func NewClient(conn *amqp.Connection, name, cookie string) (*Client, error) {
 
 	err = ch.ExchangeDeclare(
 		cookieExchangeName,
-		"direct", // type
-		false,    // durable
-		false,    // auto-deleted
-		false,    // internal
-		false,    // no-wait
-		nil,      // arguments
+		amqp.ExchangeDirect, // type
+		false,               // durable
+		false,               // auto-deleted
+		false,               // internal
+		false,               // no-wait
+		nil,                 // arguments
 	)
 
 	q, err := ch.QueueDeclare(
@@ -150,7 +150,7 @@ const (
 	ReconnectActionShouldQuit
 )
 
-func (client *Client) runAsyncAndRouteErrorToChannel(fn func(ctx context.Context) error, ctx context.Context) {
+func (client *Client) runAsyncAndRouteError(fn func(ctx context.Context) error, ctx context.Context) {
 	go func() {
 		err := fn(ctx)
 		if err != nil {
@@ -168,9 +168,9 @@ func RunClientOnConnection(name, cookie string, conn *amqp.Connection, connClose
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	client.runAsyncAndRouteErrorToChannel(client.executeUserInputLoop, ctx)
-	client.runAsyncAndRouteErrorToChannel(client.printIncomingChatMsgsLoop, ctx)
-	client.runAsyncAndRouteErrorToChannel(client.ReplyToIncomingCookieRequestsLoop, ctx)
+	client.runAsyncAndRouteError(client.executeUserInputLoop, ctx)
+	client.runAsyncAndRouteError(client.printIncomingChatMsgsLoop, ctx)
+	client.runAsyncAndRouteError(client.ReplyToIncomingCookieRequestsLoop, ctx)
 
 	select {
 	case err := <-connClosed:
@@ -196,7 +196,8 @@ func (client *Client) executeUserInputLoop(ctx context.Context) error {
 	defer ClosePrintErr(ch)
 
 	returnedMsgs := ch.NotifyReturn(make(chan amqp.Return))
-	client.runAsyncAndRouteErrorToChannel(client.handleOutgoingCookieRequestsLoop, ctx)
+
+	client.runAsyncAndRouteError(client.handleOutgoingCookieRequestsLoop, ctx)
 	for {
 		select {
 		case <-ctx.Done():
@@ -364,7 +365,7 @@ func (client *Client) printIncomingChatMsgsLoop(ctx context.Context) error {
 		client.name,                      // consumer
 		true,                             // auto ack
 		true,                             // exclusive
-		false,                            // no local
+		false,                            // this flag is unsupported
 		false,                            // no wait
 		nil,                              // args
 	)

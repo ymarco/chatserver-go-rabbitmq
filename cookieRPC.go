@@ -93,7 +93,7 @@ func (client *Client) replyToCookieRPCRequest(ch *amqp.Channel, delivery amqp.De
 	log.Printf("Replying with our cookie to %s\n", delivery.ReplyTo)
 	return ch.PublishWithContext(
 		ctx,
-		cookieExchangeName,
+		delivery.Exchange,
 		delivery.ReplyTo, // routing key
 		true,             // mandatory
 		false,            // immediate
