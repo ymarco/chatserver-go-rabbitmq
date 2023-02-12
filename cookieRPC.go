@@ -17,13 +17,7 @@ func (client *Client) RPCListenerQueueName() string {
 	return client.name + "_cookieRPCListener"
 }
 
-func (client *Client) ReplyToIncomingCookieRequests(ctx context.Context) error {
-	ch, err := client.conn.Channel()
-	if err != nil {
-		return err
-	}
-	defer ClosePrintErr(ch)
-
+func (client *Client) getIncomingMsgs(ch *amqp.Channel) (<-chan amqp.Delivery, error) {
 	q, err := ch.QueueDeclare(
 		client.RPCListenerQueueName(), // name
 		false,                         // durable
@@ -33,7 +27,7 @@ func (client *Client) ReplyToIncomingCookieRequests(ctx context.Context) error {
 		nil,                           // args
 	)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	msgs, err := ch.Consume(q.Name, "",
@@ -43,6 +37,20 @@ func (client *Client) ReplyToIncomingCookieRequests(ctx context.Context) error {
 		false, // no-wait
 		nil,   // args
 	)
+	if err != nil {
+		return nil, err
+	}
+	return msgs, nil
+}
+
+func (client *Client) ReplyToIncomingCookieRequests(ctx context.Context) error {
+	ch, err := client.conn.Channel()
+	if err != nil {
+		return err
+	}
+	defer ClosePrintErr(ch)
+
+	msgs, err := client.getIncomingMsgs(ch)
 	if err != nil {
 		return err
 	}
