@@ -95,7 +95,7 @@ func (client *Client) replyToCookieRPCRequest(ch *amqp.Channel, delivery amqp.De
 	)
 }
 
-func (client *Client) requestCookie(ch *amqp.Channel, targetUsername string, rpcChannels RpcChannels, ctx context.Context) error {
+func (client *Client) requestCookie(ch *amqp.Channel, targetUsername string, rpcChannels ResultOfCookieRequest, ctx context.Context) error {
 	id, err := client.sendCookieRequest(ch, targetUsername, ctx)
 	if err != nil {
 		return err
@@ -114,17 +114,18 @@ func (client *Client) requestCookie(ch *amqp.Channel, targetUsername string, rpc
 
 var globalIdInt int64 = 0
 
-func getGlobalId() string {
+func GenerateRequestId() string {
+	globalIdInt++
 	return strconv.FormatInt(globalIdInt, 10)
 }
 
 func (client *Client) sendCookieRequest(ch *amqp.Channel, user string, ctx context.Context) (correlationID string, err error) {
-	correlationID = getGlobalId()
+	correlationID = GenerateRequestId()
 	err = ch.PublishWithContext(ctx,
 		amqp.DefaultExchange,
 		(&Client{name: user}).RPCListenerQueueName(), // routing key
-		true,  // mandatory
-		false, // immediate
+		true,                                         // mandatory
+		false,                                        // immediate
 		amqp.Publishing{
 			ContentType:   "text/plain",
 			CorrelationId: correlationID,
@@ -141,7 +142,7 @@ func (client *Client) sendCookieRequest(ch *amqp.Channel, user string, ctx conte
 var ErrChannelClosed = errors.New("channel closed")
 var ErrMsgWasReturned = errors.New("message didn't find a destination and was returned")
 
-func (client *Client) expectReply(id string, rpcChannels RpcChannels, ctx context.Context) (cookie string, err error) {
+func (client *Client) expectReply(id string, rpcChannels ResultOfCookieRequest, ctx context.Context) (cookie string, err error) {
 	for {
 		select {
 		case <-ctx.Done():
@@ -152,8 +153,6 @@ func (client *Client) expectReply(id string, rpcChannels RpcChannels, ctx contex
 			}
 			if returnedMsg.CorrelationId == id {
 				return "", ErrMsgWasReturned
-			} else {
-				continue
 			}
 		case delivery, ok := <-rpcChannels.replies:
 			if !ok {

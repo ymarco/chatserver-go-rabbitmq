@@ -34,12 +34,12 @@ func NewClient(conn *amqp.Connection, name, cookie string) (*Client, error) {
 	defer ClosePrintErr(ch)
 	err = ch.ExchangeDeclare(
 		msgsExchangeName,
-		"topic", // type
-		true,    // durable
-		false,   // auto-deleted
-		false,   // internal
-		false,   // no-wait
-		nil,     // arguments
+		amqp.ExchangeTopic, // type
+		true,               // durable
+		false,              // auto-deleted
+		false,              // internal
+		false,              // no-wait
+		nil,                // arguments
 	)
 	if err != nil {
 		return nil, err
@@ -94,7 +94,7 @@ func (client *Client) ListenToChatMsgsFrom(ch *amqp.Channel, key BindingKey) err
 		nil)
 }
 
-func (client *Client) DontListenToChatMsgsFrom(ch *amqp.Channel, key BindingKey) error {
+func (client *Client) StopListeningToChatMsgsFrom(ch *amqp.Channel, key BindingKey) error {
 	log.Printf("Unbound from %s\n", key)
 	return ch.QueueUnbind(client.receiveChatMsgsQ.Name, string(key), msgsExchangeName, nil)
 }
@@ -201,7 +201,7 @@ func RunClientOnConnection(name, cookie string, conn *amqp.Connection, connClose
 
 const DispatchUserInputTimeout = 200 * time.Millisecond
 
-type RpcChannels struct {
+type ResultOfCookieRequest struct {
 	replies          <-chan amqp.Delivery
 	rejectedRequests <-chan amqp.Return
 }
@@ -233,7 +233,7 @@ func (client *Client) executeIncomingUserInput(ctx context.Context) error {
 				return input.Err
 			}
 
-			err := client.dispatchUserInput(input.Val, ch, RpcChannels{RPCReplies, returnedMsgs}, ctx)
+			err := client.dispatchUserInput(input.Val, ch, ResultOfCookieRequest{RPCReplies, returnedMsgs}, ctx)
 			if err != nil {
 				switch err {
 				case ErrUnknownCmd:
@@ -247,14 +247,14 @@ func (client *Client) executeIncomingUserInput(ctx context.Context) error {
 				return ErrChannelClosed
 			}
 			if msg.Exchange != msgsExchangeName {
-				panic("the only messages send on this channel should be chat messages")
+				panic("unreachable: the only messages received here should be chat messages")
 			}
 			log.Printf("Couldn't send msg on %s: %s\n", msg.RoutingKey, msg.Body)
 		}
 	}
 }
 
-func (client *Client) dispatchUserInput(input string, ch *amqp.Channel, rpcChannels RpcChannels, ctx context.Context) error {
+func (client *Client) dispatchUserInput(input string, ch *amqp.Channel, rpcChannels ResultOfCookieRequest, ctx context.Context) error {
 	ctx, cancel := context.WithTimeout(ctx, DispatchUserInputTimeout)
 	defer cancel()
 
@@ -274,7 +274,7 @@ func isValidBindingKeyComponent(str string) bool {
 
 var ErrInvalidTopicComponent = errors.New("topic components can't contain ., #, *")
 
-func (client *Client) dispatchCmd(ch *amqp.Channel, cmd Cmd, args []string, rpcChannels RpcChannels, ctx context.Context) error {
+func (client *Client) dispatchCmd(ch *amqp.Channel, cmd Cmd, args []string, rpcChannels ResultOfCookieRequest, ctx context.Context) error {
 	switch cmd {
 	case CmdDeleteUser:
 		client.quit <- struct{}{}
@@ -296,7 +296,7 @@ func (client *Client) dispatchCmd(ch *amqp.Channel, cmd Cmd, args []string, rpcC
 	}
 }
 
-func (client *Client) dispatchRequestCookieCmd(ch *amqp.Channel, args []string, rpcChannels RpcChannels, ctx context.Context) error {
+func (client *Client) dispatchRequestCookieCmd(ch *amqp.Channel, args []string, rpcChannels ResultOfCookieRequest, ctx context.Context) error {
 	if len(args) != 1 {
 		fmt.Println("Error: request_cookie needs 1 arg: USERNAME")
 		return nil
@@ -329,7 +329,7 @@ func (client *Client) dispatchRoomJoinOrLeaveCmd(ch *amqp.Channel, cmd Cmd, args
 	case CmdJoinRoom:
 		return client.ListenToChatMsgsFrom(ch, BindingKeyForRoom(key))
 	case CmdLeaveRoom:
-		return client.DontListenToChatMsgsFrom(ch, BindingKeyForRoom(key))
+		return client.StopListeningToChatMsgsFrom(ch, BindingKeyForRoom(key))
 	}
 	panic("unreachable")
 }
